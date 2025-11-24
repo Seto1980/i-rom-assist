@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v2</title>
+    <title>AI手指可動域検査アシスト v3</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -12,22 +12,17 @@
     <style>
         body { font-family: sans-serif; text-align: center; background-color: #f0f4f8; margin: 0; padding: 0; }
         .container { position: relative; width: 100%; max-width: 640px; margin: 0 auto; background: black; }
-        video { display: none; } /* 入力映像は隠す */
+        video { display: none; }
         canvas { width: 100%; height: auto; display: block; }
         
         .info-panel { 
-            position: fixed; 
-            bottom: 0; 
-            left: 0; 
-            width: 100%; 
-            background: rgba(255, 255, 255, 0.9); 
-            padding: 20px 0; 
-            border-top-left-radius: 20px; 
-            border-top-right-radius: 20px;
+            position: fixed; bottom: 0; left: 0; width: 100%; 
+            background: rgba(255, 255, 255, 0.95); padding: 20px 0; 
+            border-top-left-radius: 20px; border-top-right-radius: 20px;
             box-shadow: 0 -4px 10px rgba(0,0,0,0.1);
         }
-        h1 { font-size: 1rem; color: #333; margin: 0 0 10px 0; }
-        .angle-display { font-size: 3rem; font-weight: bold; color: #007bff; }
+        h1 { font-size: 1rem; color: #333; margin: 0 0 5px 0; }
+        .angle-display { font-size: 3.5rem; font-weight: bold; color: #007bff; font-feature-settings: "tnum"; }
         .unit { font-size: 1.5rem; color: #666; }
     </style>
 </head>
@@ -39,7 +34,7 @@
     </div>
     
     <div class="info-panel">
-        <h1>人差し指 PIP屈曲角度 v2</h1>
+        <h1>人差し指 PIP屈曲 (安定版 v3)</h1>
         <div class="angle-display">
             <span id="angle_value">--</span><span class="unit">°</span>
         </div>
@@ -51,103 +46,81 @@
     const canvasCtx = canvasElement.getContext('2d');
     const angleDisplay = document.getElementById('angle_value');
 
-    // 角度計算関数 (ROM方式: 真っ直ぐ=0度、曲げると増える)
+    // ★スムージング（平均化）用の配列
+    let angleHistory = [];
+    const SMOOTHING_FRAMES = 5; // 過去5フレームの平均をとる
+
     function calculateAngle(a, b, c) {
         const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
         let angle = Math.abs(radians * 180.0 / Math.PI);
-        
-        if (angle > 180.0) {
-            angle = 360 - angle;
-        }
-        
-        // 180度からの差分を取る（0度が伸展、数値が増えると屈曲）
-        return Math.round(180 - angle);
+        if (angle > 180.0) angle = 360 - angle;
+        return 180 - angle; // 屈曲角度
     }
 
     function onResults(results) {
-        // キャンバスサイズを映像に合わせる
         canvasElement.width = videoElement.videoWidth;
         canvasElement.height = videoElement.videoHeight;
-
         canvasCtx.save();
         canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-        
-        // カメラ映像を描画
         canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
         if (results.multiHandLandmarks) {
             for (const landmarks of results.multiHandLandmarks) {
-                // 骨格を描画
-                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
                 drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1});
 
-                // 人差し指の座標 (MP=5, PIP=6, DIP=7)
-                const p1 = landmarks[5]; 
-                const p2 = landmarks[6]; 
-                const p3 = landmarks[7]; 
+                // 人差し指 (MP=5, PIP=6, DIP=7)
+                const rawAngle = calculateAngle(landmarks[5], landmarks[6], landmarks[7]);
+                
+                // ★数値を安定させる処理（移動平均）
+                angleHistory.push(rawAngle);
+                if (angleHistory.length > SMOOTHING_FRAMES) {
+                    angleHistory.shift(); // 古いデータを捨てる
+                }
+                // 平均値を計算
+                const averageAngle = Math.round(angleHistory.reduce((a, b) => a + b, 0) / angleHistory.length);
 
-                // 角度計算
-                const angle = calculateAngle(p1, p2, p3);
-                
-                // 画面下の数値更新
-                angleDisplay.innerText = angle;
+                // 表示更新
+                angleDisplay.innerText = averageAngle;
 
-                // 画面上の関節横に描画
-                const textX = p2.x * canvasElement.width;
-                const textY = p2.y * canvasElement.height;
-                
-                canvasCtx.fillStyle = "rgba(0, 0, 0, 0.5)";
-                canvasCtx.fillRect(textX, textY - 30, 80, 40); // 背景
-                
-                canvasCtx.font = "bold 30px Arial";
-                canvasCtx.fillStyle = "#00FF00";
-                canvasCtx.fillText(angle + "°", textX + 10, textY);
+                // 画面上の描画
+                const textX = landmarks[6].x * canvasElement.width;
+                const textY = landmarks[6].y * canvasElement.height;
+                canvasCtx.fillStyle = "rgba(255, 255, 255, 0.8)";
+                canvasCtx.beginPath();
+                canvasCtx.arc(textX, textY, 40, 0, 2 * Math.PI);
+                canvasCtx.fill();
+                canvasCtx.font = "bold 24px Arial";
+                canvasCtx.fillStyle = "#007bff";
+                canvasCtx.textAlign = "center";
+                canvasCtx.textBaseline = "middle";
+                canvasCtx.fillText(averageAngle + "°", textX, textY);
             }
         }
         canvasCtx.restore();
     }
 
-    const hands = new Hands({locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-    }});
-
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
     hands.setOptions({
         maxNumHands: 1,
         modelComplexity: 1,
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5
     });
-
     hands.onResults(onResults);
 
-    // カメラ起動処理（外カメラ優先・シンプル設定）
     async function startCamera() {
         try {
-            const constraints = {
-                video: {
-                    facingMode: "environment" // 外カメラ（背面）を指定
-                }
-            };
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
             videoElement.srcObject = stream;
-            
-            // 映像が読み込まれたらMediaPipeに送信開始
             videoElement.onloadedmetadata = () => {
                 videoElement.play();
-                async function sendToMediaPipe() {
-                    await hands.send({image: videoElement});
-                    requestAnimationFrame(sendToMediaPipe);
-                }
-                sendToMediaPipe();
+                const send = async () => { await hands.send({image: videoElement}); requestAnimationFrame(send); };
+                send();
             };
-        } catch (error) {
-            console.error("カメラの起動に失敗しました:", error);
-            alert("カメラエラー: " + error.message);
-        }
+        } catch (e) { alert("カメラエラー: " + e.message); }
     }
-
     startCamera();
 </script>
-
 </body>
 </html>
