@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI可動域検査テスト</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body { font-family: sans-serif; text-align: center; background-color: #f0f4f8; }
+        .container { position: relative; margin: 20px auto; width: 90%; max-width: 640px; }
+        video { display: none; } /* 元の映像は隠す */
+        canvas { width: 100%; max-width: 640px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .info-panel { margin-top: 10px; padding: 15px; background: white; border-radius: 8px; }
+        h1 { font-size: 1.2rem; color: #333; }
+        .angle-display { font-size: 2rem; font-weight: bold; color: #007bff; }
+    </style>
+</head>
+<body>
+
+    <h1>AI可動域検査：角度測定テスト</h1>
+    <div class="container">
+        <video id="input_video"></video>
+        <canvas id="output_canvas"></canvas>
+    </div>
+    
+    <div class="info-panel">
+        <p>人差し指の第二関節(PIP)角度</p>
+        <div id="angle_value" class="angle-display">--°</div>
+    </div>
+
+<script>
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const angleDisplay = document.getElementById('angle_value');
+
+    // 角度計算関数 (A, B, Cの3点からBの角度を求める)
+    function calculateAngle(a, b, c) {
+        // ラジアンを計算
+        const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+        let angle = Math.abs(radians * 180.0 / Math.PI);
+        
+        // 180度を超えた場合の処理
+        if (angle > 180.0) {
+            angle = 360 - angle;
+        }
+        return angle;
+    }
+
+    function onResults(results) {
+        // キャンバスの準備
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+        if (results.multiHandLandmarks) {
+            for (const landmarks of results.multiHandLandmarks) {
+                // 骨格を描画
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
+                drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
+
+                // --- ここから角度計算ロジック ---
+                
+                // 人差し指の3点 (MP=5, PIP=6, DIP=7) を取得
+                // ※MediaPipeの座標系に合わせて取得します
+                const p1 = landmarks[5]; // 根元
+                const p2 = landmarks[6]; // 第二関節（ここを測る）
+                const p3 = landmarks[7]; // 第一関節
+
+                // 角度を計算（整数に丸める）
+                const angle = Math.round(calculateAngle(p1, p2, p3));
+                
+                // 画面下の数値更新
+                angleDisplay.innerText = angle + "°";
+
+                // 画面上の関節の横に文字で角度を表示
+                canvasCtx.font = "30px Arial";
+                canvasCtx.fillStyle = "blue";
+                // 座標は0-1の比率なので、キャンバスサイズを掛けてピクセル位置にする
+                canvasCtx.fillText(angle + "°", p2.x * canvasElement.width + 20, p2.y * canvasElement.height);
+            }
+        }
+        canvasCtx.restore();
+    }
+
+    const hands = new Hands({locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }});
+
+    hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+    });
+
+    hands.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+        onFrame: async () => {
+            await hands.send({image: videoElement});
+        },
+        width: 640,
+        height: 480
+    });
+    camera.start();
+</script>
+
+</body>
+</html>
