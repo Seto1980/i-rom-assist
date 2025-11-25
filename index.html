@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v9</title>
+    <title>AI手指可動域検査アシスト v11</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -15,13 +15,11 @@
         video { display: none; }
         canvas { width: 100%; height: auto; display: block; }
         
-        /* スタートボタンとオーバーレイ */
         .overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 0, 0, 0.6);
             display: flex; flex-direction: column; justify-content: center; align-items: center;
-            z-index: 20;
-            color: white;
+            z-index: 20; color: white;
         }
         .start-btn {
             padding: 15px 40px; font-size: 1.5rem; font-weight: bold;
@@ -31,7 +29,6 @@
         }
         .start-btn:active { transform: scale(0.95); }
         
-        /* 計測中のステータス表示 */
         .status-display {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
             background: rgba(0, 0, 0, 0.7); padding: 10px 20px; border-radius: 30px;
@@ -39,21 +36,16 @@
             z-index: 10; display: none; white-space: nowrap;
         }
 
-        /* 結果表示パネル（全画面） */
         .result-panel {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: white; z-index: 30; overflow-y: auto;
             display: none; padding-bottom: 50px;
         }
         .result-header { background: #007bff; color: white; padding: 15px; font-size: 1.2rem; font-weight: bold; }
-        
-        /* 結果テーブル */
         .result-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
         .result-table th, .result-table td { border: 1px solid #ddd; padding: 6px 4px; text-align: center; }
         .result-table th { background-color: #f2f2f2; color: #333; }
         .finger-row { background-color: #eef2f6; font-weight: bold; }
-        .joint-label { font-size: 0.8rem; color: #666; }
-        
         .restart-btn {
             margin: 20px auto; padding: 10px 30px; background: #6c757d; color: white;
             border: none; border-radius: 5px; font-size: 1rem; display: block;
@@ -70,14 +62,12 @@
             <p style="margin-bottom:20px;">手をカメラに向けてください</p>
             <button class="start-btn" onclick="startMeasurementSequence()">計測スタート</button>
         </div>
-
         <div id="status_display" class="status-display"></div>
     </div>
 
     <div id="result_panel" class="result-panel">
         <div class="result-header">計測結果</div>
-        <table class="result-table" id="result_table_body">
-            </table>
+        <table class="result-table" id="result_table_body"></table>
         <button class="restart-btn" onclick="location.reload()">もう一度計測する</button>
     </div>
 
@@ -90,36 +80,28 @@
     const resultPanel = document.getElementById('result_panel');
     const resultTableBody = document.getElementById('result_table_body');
 
-    // 状態管理: 'idle', 'phase1' (4指), 'interval', 'phase2' (母指), 'finished'
     let currentState = 'idle';
     
-    // データ保持用 (Max=屈曲, Min=伸展)
-    // 初期値: Flex(屈曲)は0からスタートして最大値を更新、Ext(伸展)は180からスタートして最小値を更新
+    // データ保持用
     const fingersData = {
-        thumb:  { name:"母指", joints: { cm:{flex:0, ext:180}, mp:{flex:0, ext:180}, ip:{flex:0, ext:180} } },
-        index:  { name:"示指", joints: { mp:{flex:0, ext:180}, pip:{flex:0, ext:180}, dip:{flex:0, ext:180} } },
-        middle: { name:"中指", joints: { mp:{flex:0, ext:180}, pip:{flex:0, ext:180}, dip:{flex:0, ext:180} } },
-        ring:   { name:"環指", joints: { mp:{flex:0, ext:180}, pip:{flex:0, ext:180}, dip:{flex:0, ext:180} } },
-        pinky:  { name:"小指", joints: { mp:{flex:0, ext:180}, pip:{flex:0, ext:180}, dip:{flex:0, ext:180} } }
+        thumb:  { name:"母指", joints: { cm:{val:0, flex:0, ext:180}, mp:{val:0, flex:0, ext:180}, ip:{val:0, flex:0, ext:180} } },
+        index:  { name:"示指", joints: { mp:{val:0, flex:0, ext:180}, pip:{val:0, flex:0, ext:180}, dip:{val:0, flex:0, ext:180} } },
+        middle: { name:"中指", joints: { mp:{val:0, flex:0, ext:180}, pip:{val:0, flex:0, ext:180}, dip:{val:0, flex:0, ext:180} } },
+        ring:   { name:"環指", joints: { mp:{val:0, flex:0, ext:180}, pip:{val:0, flex:0, ext:180}, dip:{val:0, flex:0, ext:180} } },
+        pinky:  { name:"小指", joints: { mp:{val:0, flex:0, ext:180}, pip:{val:0, flex:0, ext:180}, dip:{val:0, flex:0, ext:180} } }
     };
 
-    // 音声読み上げ関数
     function speak(text) {
         const uttr = new SpeechSynthesisUtterance(text);
         uttr.lang = "ja-JP";
-        uttr.rate = 1.0;
         speechSynthesis.speak(uttr);
     }
 
-    // ★計測シーケンス開始
     function startMeasurementSequence() {
         startOverlay.style.display = 'none';
         statusDisplay.style.display = 'block';
-        
         speak("計測を開始します。スタートポジションに合わせてください。では10秒間、4本の指を動かしてみてください");
         statusDisplay.innerText = "4指 計測中 (あと10秒)";
-        
-        // 少し待ってから計測開始
         setTimeout(() => {
             currentState = 'phase1';
             let timeLeft = 10;
@@ -132,14 +114,12 @@
                     startPhase2();
                 }
             }, 1000);
-        }, 3000); // アナウンス待ち
+        }, 3000);
     }
 
-    // ★フェーズ2（母指）へ
     function startPhase2() {
         speak("次に、前腕を回外してください。そして母指を5秒間動かしてください");
         statusDisplay.innerText = "準備中...";
-        
         setTimeout(() => {
             currentState = 'phase2';
             let timeLeft = 5;
@@ -155,7 +135,6 @@
         }, 4000);
     }
 
-    // ★計測終了
     function finishMeasurement() {
         currentState = 'finished';
         speak("お疲れ様でした。計測は終了です");
@@ -163,7 +142,8 @@
         showResults();
     }
 
-    // 角度計算
+    // ★角度計算ロジック
+    // 3点 A(固定側)-B(関節)-C(可動側) の角度を算出
     function calculateAngle(a, b, c) {
         const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
         let angle = Math.abs(radians * 180.0 / Math.PI);
@@ -171,16 +151,33 @@
         return 180 - angle;
     }
 
-    // データ更新処理
-    function updateJointData(fingerKey, jointKey, angle) {
-        const j = fingersData[fingerKey].joints[jointKey];
-        // 2度単位に丸める
-        const val = Math.round(angle / 2) * 2;
+    // ★強力なノイズフィルター (Exponential Moving Average)
+    // alphaが小さいほど、過去の値を重視して滑らかになる（反応は遅れる）
+    function applyFilter(currentVal, newVal, jointType) {
+        let alpha = 0.3; // デフォルト (MP, PIP)
+        if (jointType === 'dip' || jointType === 'ip') {
+            alpha = 0.15; // DIPとIPはブレやすいので、より強く滑らかにする
+        }
         
-        // 最大値（屈曲）更新
-        if (val > j.flex) j.flex = val;
-        // 最小値（伸展）更新
-        if (val < j.ext) j.ext = val;
+        // 最初の値が入っていない場合はそのまま返す
+        if (currentVal === 0 && newVal > 0) return newVal;
+
+        // フィルタ計算: 新しい値 = 現在値 * (1-α) + 新観測値 * α
+        return currentVal * (1 - alpha) + newVal * alpha;
+    }
+
+    function updateJointData(fingerKey, jointKey, rawAngle) {
+        const j = fingersData[fingerKey].joints[jointKey];
+        
+        // フィルタ適用
+        j.val = applyFilter(j.val, rawAngle, jointKey);
+        
+        // 2度単位に丸める
+        const displayVal = Math.round(j.val / 2) * 2;
+        
+        // 最大・最小更新
+        if (displayVal > j.flex) j.flex = displayVal;
+        if (displayVal < j.ext) j.ext = displayVal;
     }
 
     function onResults(results) {
@@ -195,30 +192,32 @@
             drawConnectors(canvasCtx, lm, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
             drawLandmarks(canvasCtx, lm, {color: '#FF0000', lineWidth: 1});
 
-            // ★フェーズ1: 4指 (Index, Middle, Ring, Pinky)
             if (currentState === 'phase1') {
-                // Index(示指)
+                // 示指～小指
+                // MP: Wrist(0)-MP(5)-PIP(6)  ※中手骨-基節骨
+                // PIP: MP(5)-PIP(6)-DIP(7)   ※基節骨-中節骨
+                // DIP: PIP(6)-DIP(7)-Tip(8)  ※中節骨-末節骨
+                
+                // Index
                 updateJointData('index', 'mp',  calculateAngle(lm[0], lm[5], lm[6]));
                 updateJointData('index', 'pip', calculateAngle(lm[5], lm[6], lm[7]));
                 updateJointData('index', 'dip', calculateAngle(lm[6], lm[7], lm[8]));
-                // Middle(中指)
+                // Middle
                 updateJointData('middle', 'mp',  calculateAngle(lm[0], lm[9], lm[10]));
                 updateJointData('middle', 'pip', calculateAngle(lm[9], lm[10], lm[11]));
                 updateJointData('middle', 'dip', calculateAngle(lm[10], lm[11], lm[12]));
-                // Ring(環指)
+                // Ring
                 updateJointData('ring', 'mp',  calculateAngle(lm[0], lm[13], lm[14]));
                 updateJointData('ring', 'pip', calculateAngle(lm[13], lm[14], lm[15]));
                 updateJointData('ring', 'dip', calculateAngle(lm[14], lm[15], lm[16]));
-                // Pinky(小指)
+                // Pinky
                 updateJointData('pinky', 'mp',  calculateAngle(lm[0], lm[17], lm[18]));
                 updateJointData('pinky', 'pip', calculateAngle(lm[17], lm[18], lm[19]));
                 updateJointData('pinky', 'dip', calculateAngle(lm[18], lm[19], lm[20]));
             }
-
-            // ★フェーズ2: 母指 (Thumb)
             if (currentState === 'phase2') {
-                // Thumb
-                // CM: Wrist(0)-CMC(1)-MCP(2) ※簡易計測
+                // Thumb (母指)
+                // CM: Wrist(0)-CMC(1)-MCP(2)
                 updateJointData('thumb', 'cm', calculateAngle(lm[0], lm[1], lm[2])); 
                 // MP: CMC(1)-MCP(2)-IP(3)
                 updateJointData('thumb', 'mp', calculateAngle(lm[1], lm[2], lm[3]));
@@ -229,51 +228,18 @@
         canvasCtx.restore();
     }
 
-    // 結果表示生成
     function showResults() {
         resultPanel.style.display = 'block';
-        let html = `
-            <thead>
-                <tr>
-                    <th>指</th>
-                    <th>関節</th>
-                    <th>屈曲</th>
-                    <th>伸展</th>
-                    <th>TAM</th>
-                </tr>
-            </thead>
-            <tbody>
-        `;
-
-        // 母指の行生成
+        let html = `<thead><tr><th>指</th><th>関節</th><th>屈曲</th><th>伸展</th><th>TAM</th></tr></thead><tbody>`;
         const t = fingersData.thumb;
-        // TAM (MP+IP) = (MP屈-MP伸) + (IP屈-IP伸)
-        const t_mp_range = Math.max(0, t.joints.mp.flex - t.joints.mp.ext);
-        const t_ip_range = Math.max(0, t.joints.ip.flex - t.joints.ip.ext);
-        const t_tam = t_mp_range + t_ip_range;
-
-        html += `
-            <tr class="finger-row"><td rowspan="3">${t.name}</td><td>CM</td><td>${t.joints.cm.flex}°</td><td>${t.joints.cm.ext}°</td><td>-</td></tr>
-            <tr class="finger-row"><td>MP</td><td>${t.joints.mp.flex}°</td><td>${t.joints.mp.ext}°</td><td rowspan="2">${t_tam}°</td></tr>
-            <tr class="finger-row"><td>IP</td><td>${t.joints.ip.flex}°</td><td>${t.joints.ip.ext}°</td></tr>
-        `;
-
-        // 他4指の行生成
-        const others = ['index', 'middle', 'ring', 'pinky'];
-        others.forEach(key => {
+        const t_tam = Math.max(0, t.joints.mp.flex - t.joints.mp.ext) + Math.max(0, t.joints.ip.flex - t.joints.ip.ext);
+        html += `<tr class="finger-row"><td rowspan="3">${t.name}</td><td>CM</td><td>${t.joints.cm.flex}°</td><td>${t.joints.cm.ext}°</td><td>-</td></tr><tr class="finger-row"><td>MP</td><td>${t.joints.mp.flex}°</td><td>${t.joints.mp.ext}°</td><td rowspan="2">${t_tam}°</td></tr><tr class="finger-row"><td>IP</td><td>${t.joints.ip.flex}°</td><td>${t.joints.ip.ext}°</td></tr>`;
+        
+        ['index', 'middle', 'ring', 'pinky'].forEach(key => {
             const f = fingersData[key];
-            const mp_r = Math.max(0, f.joints.mp.flex - f.joints.mp.ext);
-            const pip_r = Math.max(0, f.joints.pip.flex - f.joints.pip.ext);
-            const dip_r = Math.max(0, f.joints.dip.flex - f.joints.dip.ext);
-            const tam = mp_r + pip_r + dip_r;
-
-            html += `
-                <tr><td rowspan="3">${f.name}</td><td>MP</td><td>${f.joints.mp.flex}°</td><td>${f.joints.mp.ext}°</td><td rowspan="3">${tam}°</td></tr>
-                <tr><td>PIP</td><td>${f.joints.pip.flex}°</td><td>${f.joints.pip.ext}°</td></tr>
-                <tr><td>DIP</td><td>${f.joints.dip.flex}°</td><td>${f.joints.dip.ext}°</td></tr>
-            `;
+            const tam = Math.max(0, f.joints.mp.flex - f.joints.mp.ext) + Math.max(0, f.joints.pip.flex - f.joints.pip.ext) + Math.max(0, f.joints.dip.flex - f.joints.dip.ext);
+            html += `<tr><td rowspan="3">${f.name}</td><td>MP</td><td>${f.joints.mp.flex}°</td><td>${f.joints.mp.ext}°</td><td rowspan="3">${tam}°</td></tr><tr><td>PIP</td><td>${f.joints.pip.flex}°</td><td>${f.joints.pip.ext}°</td></tr><tr><td>DIP</td><td>${f.joints.dip.flex}°</td><td>${f.joints.dip.ext}°</td></tr>`;
         });
-
         html += `</tbody>`;
         resultTableBody.innerHTML = html;
     }
