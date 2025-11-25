@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v5</title>
+    <title>AI手指可動域検査アシスト v6</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -15,22 +15,23 @@
         video { display: none; }
         canvas { width: 100%; height: auto; display: block; }
         
-        /* 状態表示オーバーレイ */
+        /* 状態表示（左上） */
         .status-overlay {
-            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-            padding: 8px 20px; border-radius: 20px; font-weight: bold; font-size: 1rem;
-            z-index: 10;
+            position: absolute; top: 10px; left: 10px;
+            padding: 6px 15px; border-radius: 15px; font-weight: bold; font-size: 0.9rem;
+            z-index: 10; color: white;
         }
-        .status-ok { background-color: rgba(40, 167, 69, 0.9); color: white; }
-        .status-ng { background-color: rgba(220, 53, 69, 0.9); color: white; }
+        .status-ok { background-color: rgba(40, 167, 69, 0.8); }
+        .status-ng { background-color: rgba(220, 53, 69, 0.8); }
 
-        /* 警告画面（グレーアウト） */
+        /* 警告画面（薄くする） */
         .warning-mask {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.5); /* 少し薄くした */
             display: flex; justify-content: center; align-items: center;
             color: white; font-size: 1.5rem; font-weight: bold;
-            display: none; /* デフォルトは非表示 */
+            display: none;
+            pointer-events: none; /* 操作を邪魔しない */
         }
 
         .info-panel { 
@@ -58,12 +59,12 @@
         <canvas id="output_canvas"></canvas>
         <div id="status_msg" class="status-overlay status-ng">準備中...</div>
         <div id="warning_mask" class="warning-mask">
-            <div>前腕を中間位に<br>してください</div>
+            <div>前腕をガイドに合わせてください</div>
         </div>
     </div>
     
     <div class="info-panel">
-        <h1>示指PIP関節 (中間位測定)</h1>
+        <h1>示指PIP関節 (ガイド判定v6)</h1>
         
         <div class="record-grid">
             <div class="record-box">
@@ -110,61 +111,48 @@
         return 180 - angle;
     }
 
-    // ★前腕中間位の判定ロジック
-    // 親指の付け根(2)と小指の付け根(17)のY座標の差を見る
-    // 中間位ならYの差が大きく（縦並び）、回内ならXの差が大きくなる（横並び）
+    // ★判定基準を緩和
     function isNeutralPosition(landmarks) {
-        const thumbBase = landmarks[2]; // 親指CM/MP付近
-        const pinkyBase = landmarks[17]; // 小指MP
-
+        const thumbBase = landmarks[2]; 
+        const pinkyBase = landmarks[17]; 
         const xDiff = Math.abs(thumbBase.x - pinkyBase.x);
         const yDiff = Math.abs(thumbBase.y - pinkyBase.y);
-
-        // 縦（Y差）が横（X差）よりも十分に大きい場合を「中間位」とみなす
-        // 比率は調整可能だが、ここでは Y差 > X差 * 1.5 とする
-        return yDiff > (xDiff * 1.2); 
+        // 閾値を1.2から0.6へ緩和（多少斜めでもOKにする）
+        return yDiff > (xDiff * 0.6); 
     }
 
-    // ★茎状突起ライン（仮想）の描画
-    function drawWristLine(ctx, wrist, indexBase, width, height) {
+    // ★新しいガイド描画（透明な円形ターゲット）
+    function drawWristGuide(ctx, wrist, width, height, isOk) {
         const wx = wrist.x * width;
         const wy = wrist.y * height;
-        const ix = indexBase.x * width;
-        const iy = indexBase.y * height;
+        const radius = 70; // ガイドの大きさ
 
-        // 手首から人差し指へのベクトル
-        const dx = ix - wx;
-        const dy = iy - wy;
-
-        // 垂直ベクトル（90度回転）
-        const perpX = -dy;
-        const perpY = dx;
-
-        // 長さを正規化して適当な長さに
-        const len = Math.sqrt(perpX*perpX + perpY*perpY);
-        const scale = 60; // ラインの長さ（片側）
-        const nx = (perpX / len) * scale;
-        const ny = (perpY / len) * scale;
-
-        // 線を描画
         ctx.beginPath();
-        ctx.moveTo(wx - nx, wy - ny);
-        ctx.lineTo(wx + nx, wy + ny);
-        ctx.strokeStyle = "#00FFFF"; // 水色
-        ctx.lineWidth = 4;
+        ctx.arc(wx, wy, radius, 0, 2 * Math.PI);
+        
+        if (isOk) {
+            // OK: 青く光る
+            ctx.fillStyle = "rgba(0, 255, 255, 0.2)";
+            ctx.strokeStyle = "rgba(0, 255, 255, 0.8)";
+            ctx.shadowColor = "#00FFFF"; ctx.shadowBlur = 15;
+        } else {
+            // NG: 赤く光る
+            ctx.fillStyle = "rgba(255, 50, 50, 0.2)";
+            ctx.strokeStyle = "rgba(255, 50, 50, 0.8)";
+            ctx.shadowColor = "#FF0000"; ctx.shadowBlur = 15;
+        }
+        
+        ctx.lineWidth = 3;
+        ctx.fill();
         ctx.stroke();
-
-        // 仮想の茎状突起ポイント
-        ctx.fillStyle = "#00FFFF";
-        ctx.beginPath(); ctx.arc(wx - nx, wy - ny, 5, 0, 2*Math.PI); ctx.fill();
-        ctx.beginPath(); ctx.arc(wx + nx, wy + ny, 5, 0, 2*Math.PI); ctx.fill();
+        ctx.shadowBlur = 0; // 他の描画に影響しないようリセット
         
         // 文字ラベル
-        ctx.font = "12px Arial";
-        ctx.fillStyle = "white";
-        ctx.fillText("尺骨/橈骨想定線", wx + 10, wy + 20);
+        ctx.font = "bold 14px Arial";
+        ctx.fillStyle = isOk ? "#00FFFF" : "#FF5555";
+        ctx.textAlign = "center";
+        ctx.fillText(isOk ? "中間位 OK" : "ガイドに合わせて", wx, wy - radius - 15);
     }
-
 
     function onResults(results) {
         canvasElement.width = videoElement.videoWidth;
@@ -175,29 +163,26 @@
 
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
             const landmarks = results.multiHandLandmarks[0];
-
-            // 1. 中間位チェック
             const isNeutral = isNeutralPosition(landmarks);
+
+            // 骨格描画（NGの時は薄く）
+            const skeletonColor = isNeutral ? '#00FF00' : 'rgba(200,200,200,0.5)';
+            drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: skeletonColor, lineWidth: 2});
+            drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1});
+
+            // ★ガイドを描画（判定結果を色に反映）
+            drawWristGuide(canvasCtx, landmarks[0], canvasElement.width, canvasElement.height, isNeutral);
 
             if (isNeutral) {
                 // OKの状態
-                elStatusMsg.innerText = "測定中 (中間位OK)";
+                elStatusMsg.innerText = "測定中";
                 elStatusMsg.className = "status-overlay status-ok";
-                elWarningMask.style.display = "none"; // マスク解除
+                elWarningMask.style.display = "none";
 
-                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
-                drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1});
-
-                // 2. 茎状突起ライン描画 (手首=0, 人差し指MP=5)
-                drawWristLine(canvasCtx, landmarks[0], landmarks[5], canvasElement.width, canvasElement.height);
-
-                // 3. 角度計算
                 const rawAngle = calculateAngle(landmarks[5], landmarks[6], landmarks[7]);
-                
                 angleHistory.push(rawAngle);
                 if (angleHistory.length > SMOOTHING_FRAMES) angleHistory.shift();
                 let avgAngle = angleHistory.reduce((a, b) => a + b, 0) / angleHistory.length;
-
                 let displayAngle = Math.round(avgAngle / 2) * 2;
 
                 if (displayAngle > maxFlexionVal) {
@@ -224,17 +209,13 @@
                 canvasCtx.fillText(displayAngle + "°", textX, textY);
 
             } else {
-                // NGの状態（中間位ではない）
-                elStatusMsg.innerText = "角度不正";
+                // NGの状態
+                elStatusMsg.innerText = "ガイドから外れています";
                 elStatusMsg.className = "status-overlay status-ng";
-                elWarningMask.style.display = "flex"; // マスク表示
-
-                // 骨格は薄く表示
-                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: 'rgba(200,200,200,0.3)', lineWidth: 1});
+                elWarningMask.style.display = "flex";
             }
 
         } else {
-            // 手が見つからない
             elStatusMsg.innerText = "手を映してください";
             elStatusMsg.className = "status-overlay status-ng";
             elWarningMask.style.display = "none";
@@ -264,7 +245,6 @@
     }
     startCamera();
 
-    // Wake Lock
     let wakeLock = null;
     async function requestWakeLock() {
         try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
