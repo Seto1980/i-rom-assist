@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v6</title>
+    <title>AI手指可動域検査アシスト v7</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -11,45 +11,62 @@
 
     <style>
         body { font-family: sans-serif; text-align: center; background-color: #f0f4f8; margin: 0; padding: 0; }
-        .container { position: relative; width: 100%; max-width: 640px; margin: 0 auto; background: black; }
+        .container { position: relative; width: 100%; max-width: 640px; margin: 0 auto; background: black; overflow: hidden; }
         video { display: none; }
         canvas { width: 100%; height: auto; display: block; }
         
-        /* 状態表示（左上） */
-        .status-overlay {
-            position: absolute; top: 10px; left: 10px;
-            padding: 6px 15px; border-radius: 15px; font-weight: bold; font-size: 0.9rem;
-            z-index: 10; color: white;
+        /* ★固定ガイドライン（前腕合わせ用） */
+        .static-guide {
+            position: absolute;
+            top: 50%; left: 0; width: 100%; height: 4px;
+            background: rgba(0, 255, 255, 0.4); /* 水色のライン */
+            transform: translateY(-50%);
+            pointer-events: none;
+            z-index: 5;
         }
-        .status-ok { background-color: rgba(40, 167, 69, 0.8); }
-        .status-ng { background-color: rgba(220, 53, 69, 0.8); }
-
-        /* 警告画面（薄くする） */
-        .warning-mask {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.5); /* 少し薄くした */
-            display: flex; justify-content: center; align-items: center;
-            color: white; font-size: 1.5rem; font-weight: bold;
-            display: none;
-            pointer-events: none; /* 操作を邪魔しない */
+        .static-guide::after {
+            content: "この線に前腕（橈骨）を合わせてください";
+            position: absolute; top: -30px; left: 50%; transform: translateX(-50%);
+            color: rgba(0, 255, 255, 0.8); font-weight: bold; font-size: 0.9rem;
+            text-shadow: 1px 1px 2px black;
+            width: 100%;
+        }
+        /* 手首の位置マーカー */
+        .wrist-marker {
+            position: absolute; top: 50%; right: 15%; /* 画面右寄りに手首を置く想定 */
+            width: 20px; height: 20px;
+            background: rgba(255, 0, 0, 0.5);
+            border: 2px solid white; border-radius: 50%;
+            transform: translate(50%, -50%);
+            z-index: 6;
+        }
+        .wrist-marker::after {
+            content: "手首";
+            position: absolute; top: 25px; left: 50%; transform: translateX(-50%);
+            color: white; font-size: 0.8rem;
         }
 
+        /* 下部パネル（3関節表示用に拡張） */
         .info-panel { 
             position: fixed; bottom: 0; left: 0; width: 100%; 
-            background: rgba(255, 255, 255, 0.95); padding: 15px 0 30px 0; 
+            background: rgba(255, 255, 255, 0.95); padding: 10px 0 20px 0; 
             border-top-left-radius: 20px; border-top-right-radius: 20px;
             box-shadow: 0 -4px 10px rgba(0,0,0,0.1);
-            display: flex; flex-direction: column; align-items: center;
         }
-        h1 { font-size: 1.1rem; color: #333; margin: 0 0 15px 0; font-weight: bold; }
+        h1 { font-size: 1rem; color: #333; margin: 0 0 10px 0; font-weight: bold; }
+
+        /* テーブルデザイン */
+        .rom-table {
+            width: 95%; margin: 0 auto; border-collapse: collapse; font-size: 0.9rem;
+        }
+        .rom-table th { background: #e9ecef; padding: 8px; border-radius: 5px; color: #495057; }
+        .rom-table td { padding: 5px; text-align: center; border-bottom: 1px solid #dee2e6; }
+        .joint-name { font-weight: bold; color: #333; }
+        .val-box { font-size: 1.4rem; font-weight: bold; color: #007bff; }
+        .max-val { font-size: 0.9rem; color: #666; }
+        .unit { font-size: 0.8rem; color: #888; }
         
-        .record-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; width: 90%; max-width: 400px; }
-        .record-box { background: #eef2f6; padding: 10px; border-radius: 10px; text-align: center; }
-        .record-label { font-size: 0.9rem; color: #666; display: block; margin-bottom: 5px; }
-        .record-value { font-size: 2rem; font-weight: bold; color: #007bff; }
-        .unit { font-size: 1rem; color: #666; }
-        .current-value { font-size: 0.9rem; color: #999; margin-top: 10px; }
-        .reset-btn { margin-top: 15px; padding: 8px 20px; background-color: #6c757d; color: white; border: none; border-radius: 20px; font-size: 0.9rem; cursor: pointer; }
+        .reset-btn { margin-top: 10px; padding: 6px 20px; background-color: #6c757d; color: white; border: none; border-radius: 20px; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -57,27 +74,45 @@
     <div class="container">
         <video id="input_video" playsinline></video>
         <canvas id="output_canvas"></canvas>
-        <div id="status_msg" class="status-overlay status-ng">準備中...</div>
-        <div id="warning_mask" class="warning-mask">
-            <div>前腕をガイドに合わせてください</div>
-        </div>
+        
+        <div class="static-guide"></div>
+        <div class="wrist-marker"></div>
     </div>
     
     <div class="info-panel">
-        <h1>示指PIP関節 (ガイド判定v6)</h1>
+        <h1>示指 3関節同時測定</h1>
         
-        <div class="record-grid">
-            <div class="record-box">
-                <span class="record-label">屈曲 (MAX)</span>
-                <div><span id="max_flexion" class="record-value">0</span><span class="unit">°</span></div>
-            </div>
-            <div class="record-box">
-                <span class="record-label">伸展 (MAX)</span>
-                <div><span id="max_extension" class="record-value">--</span><span class="unit">°</span></div>
-            </div>
-        </div>
+        <table class="rom-table">
+            <thead>
+                <tr>
+                    <th>関節</th>
+                    <th>現在</th>
+                    <th>屈曲MAX</th>
+                    <th>伸展MAX</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="joint-name">MP</td>
+                    <td><span id="mp_now" class="val-box">--</span></td>
+                    <td><span id="mp_flex" class="max-val">0</span></td>
+                    <td><span id="mp_ext" class="max-val">--</span></td>
+                </tr>
+                <tr>
+                    <td class="joint-name">PIP</td>
+                    <td><span id="pip_now" class="val-box">--</span></td>
+                    <td><span id="pip_flex" class="max-val">0</span></td>
+                    <td><span id="pip_ext" class="max-val">--</span></td>
+                </tr>
+                <tr>
+                    <td class="joint-name">DIP</td>
+                    <td><span id="dip_now" class="val-box">--</span></td>
+                    <td><span id="dip_flex" class="max-val">0</span></td>
+                    <td><span id="dip_ext" class="max-val">--</span></td>
+                </tr>
+            </tbody>
+        </table>
 
-        <div class="current-value">現在: <span id="current_angle">--</span>°</div>
         <button class="reset-btn" onclick="resetRecords()">記録リセット</button>
     </div>
 
@@ -85,25 +120,26 @@
     const videoElement = document.getElementById('input_video');
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
-    const elMaxFlexion = document.getElementById('max_flexion');
-    const elMaxExtension = document.getElementById('max_extension');
-    const elCurrentAngle = document.getElementById('current_angle');
-    const elStatusMsg = document.getElementById('status_msg');
-    const elWarningMask = document.getElementById('warning_mask');
 
-    let maxFlexionVal = 0;
-    let maxExtensionVal = 999;
-    let angleHistory = [];
+    // データ保持用オブジェクト
+    const joints = {
+        mp:  { now: 0, flex: 0, ext: 999, history: [] },
+        pip: { now: 0, flex: 0, ext: 999, history: [] },
+        dip: { now: 0, flex: 0, ext: 999, history: [] }
+    };
     const SMOOTHING_FRAMES = 5;
 
     function resetRecords() {
-        maxFlexionVal = 0;
-        maxExtensionVal = 999;
-        elMaxFlexion.innerText = "0";
-        elMaxExtension.innerText = "--";
-        angleHistory = [];
+        ['mp', 'pip', 'dip'].forEach(key => {
+            joints[key].flex = 0;
+            joints[key].ext = 999;
+            joints[key].history = [];
+            document.getElementById(`${key}_flex`).innerText = "0";
+            document.getElementById(`${key}_ext`).innerText = "--";
+        });
     }
 
+    // 角度計算 (0度基準)
     function calculateAngle(a, b, c) {
         const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
         let angle = Math.abs(radians * 180.0 / Math.PI);
@@ -111,47 +147,29 @@
         return 180 - angle;
     }
 
-    // ★判定基準を緩和
-    function isNeutralPosition(landmarks) {
-        const thumbBase = landmarks[2]; 
-        const pinkyBase = landmarks[17]; 
-        const xDiff = Math.abs(thumbBase.x - pinkyBase.x);
-        const yDiff = Math.abs(thumbBase.y - pinkyBase.y);
-        // 閾値を1.2から0.6へ緩和（多少斜めでもOKにする）
-        return yDiff > (xDiff * 0.6); 
-    }
-
-    // ★新しいガイド描画（透明な円形ターゲット）
-    function drawWristGuide(ctx, wrist, width, height, isOk) {
-        const wx = wrist.x * width;
-        const wy = wrist.y * height;
-        const radius = 70; // ガイドの大きさ
-
-        ctx.beginPath();
-        ctx.arc(wx, wy, radius, 0, 2 * Math.PI);
+    function updateJoint(key, p1, p2, p3) {
+        const rawAngle = calculateAngle(p1, p2, p3);
+        const j = joints[key];
         
-        if (isOk) {
-            // OK: 青く光る
-            ctx.fillStyle = "rgba(0, 255, 255, 0.2)";
-            ctx.strokeStyle = "rgba(0, 255, 255, 0.8)";
-            ctx.shadowColor = "#00FFFF"; ctx.shadowBlur = 15;
-        } else {
-            // NG: 赤く光る
-            ctx.fillStyle = "rgba(255, 50, 50, 0.2)";
-            ctx.strokeStyle = "rgba(255, 50, 50, 0.8)";
-            ctx.shadowColor = "#FF0000"; ctx.shadowBlur = 15;
+        j.history.push(rawAngle);
+        if (j.history.length > SMOOTHING_FRAMES) j.history.shift();
+        const avg = j.history.reduce((a, b) => a + b, 0) / j.history.length;
+        
+        // 2度単位
+        const displayVal = Math.round(avg / 2) * 2;
+        
+        // 更新
+        document.getElementById(`${key}_now`).innerText = displayVal;
+        
+        // MAX記録
+        if (displayVal > j.flex) {
+            j.flex = displayVal;
+            document.getElementById(`${key}_flex`).innerText = j.flex;
         }
-        
-        ctx.lineWidth = 3;
-        ctx.fill();
-        ctx.stroke();
-        ctx.shadowBlur = 0; // 他の描画に影響しないようリセット
-        
-        // 文字ラベル
-        ctx.font = "bold 14px Arial";
-        ctx.fillStyle = isOk ? "#00FFFF" : "#FF5555";
-        ctx.textAlign = "center";
-        ctx.fillText(isOk ? "中間位 OK" : "ガイドに合わせて", wx, wy - radius - 15);
+        if (displayVal < j.ext) {
+            j.ext = displayVal;
+            document.getElementById(`${key}_ext`).innerText = j.ext;
+        }
     }
 
     function onResults(results) {
@@ -161,64 +179,20 @@
         canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
         canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            const landmarks = results.multiHandLandmarks[0];
-            const isNeutral = isNeutralPosition(landmarks);
+        if (results.multiHandLandmarks) {
+            for (const landmarks of results.multiHandLandmarks) {
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+                drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1});
 
-            // 骨格描画（NGの時は薄く）
-            const skeletonColor = isNeutral ? '#00FF00' : 'rgba(200,200,200,0.5)';
-            drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: skeletonColor, lineWidth: 2});
-            drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1});
-
-            // ★ガイドを描画（判定結果を色に反映）
-            drawWristGuide(canvasCtx, landmarks[0], canvasElement.width, canvasElement.height, isNeutral);
-
-            if (isNeutral) {
-                // OKの状態
-                elStatusMsg.innerText = "測定中";
-                elStatusMsg.className = "status-overlay status-ok";
-                elWarningMask.style.display = "none";
-
-                const rawAngle = calculateAngle(landmarks[5], landmarks[6], landmarks[7]);
-                angleHistory.push(rawAngle);
-                if (angleHistory.length > SMOOTHING_FRAMES) angleHistory.shift();
-                let avgAngle = angleHistory.reduce((a, b) => a + b, 0) / angleHistory.length;
-                let displayAngle = Math.round(avgAngle / 2) * 2;
-
-                if (displayAngle > maxFlexionVal) {
-                    maxFlexionVal = displayAngle;
-                    elMaxFlexion.innerText = maxFlexionVal;
-                }
-                if (displayAngle < maxExtensionVal) {
-                    maxExtensionVal = displayAngle;
-                    elMaxExtension.innerText = maxExtensionVal;
-                }
-                elCurrentAngle.innerText = displayAngle;
-
-                // 角度描画
-                const textX = landmarks[6].x * canvasElement.width;
-                const textY = landmarks[6].y * canvasElement.height;
-                canvasCtx.fillStyle = "rgba(0, 0, 0, 0.6)";
-                canvasCtx.beginPath();
-                canvasCtx.arc(textX, textY, 35, 0, 2 * Math.PI);
-                canvasCtx.fill();
-                canvasCtx.font = "bold 20px Arial";
-                canvasCtx.fillStyle = "#fff";
-                canvasCtx.textAlign = "center";
-                canvasCtx.textBaseline = "middle";
-                canvasCtx.fillText(displayAngle + "°", textX, textY);
-
-            } else {
-                // NGの状態
-                elStatusMsg.innerText = "ガイドから外れています";
-                elStatusMsg.className = "status-overlay status-ng";
-                elWarningMask.style.display = "flex";
+                // 人差し指の関節: 
+                // MP  = Wrist(0) -> MP(5) -> PIP(6)
+                // PIP = MP(5)    -> PIP(6) -> DIP(7)
+                // DIP = PIP(6)   -> DIP(7) -> Tip(8)
+                
+                updateJoint('mp',  landmarks[0], landmarks[5], landmarks[6]);
+                updateJoint('pip', landmarks[5], landmarks[6], landmarks[7]);
+                updateJoint('dip', landmarks[6], landmarks[7], landmarks[8]);
             }
-
-        } else {
-            elStatusMsg.innerText = "手を映してください";
-            elStatusMsg.className = "status-overlay status-ng";
-            elWarningMask.style.display = "none";
         }
         canvasCtx.restore();
     }
@@ -246,13 +220,9 @@
     startCamera();
 
     let wakeLock = null;
-    async function requestWakeLock() {
-        try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
-    }
+    async function requestWakeLock() { try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {} }
     requestWakeLock();
-    document.addEventListener('visibilitychange', async () => {
-        if (wakeLock !== null && document.visibilityState === 'visible') await requestWakeLock();
-    });
+    document.addEventListener('visibilitychange', async () => { if (wakeLock !== null && document.visibilityState === 'visible') await requestWakeLock(); });
 </script>
 </body>
 </html>
