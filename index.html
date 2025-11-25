@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v4</title>
+    <title>AI手指可動域検査アシスト v5</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -15,7 +15,24 @@
         video { display: none; }
         canvas { width: 100%; height: auto; display: block; }
         
-        /* 下部のパネルデザイン変更 */
+        /* 状態表示オーバーレイ */
+        .status-overlay {
+            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+            padding: 8px 20px; border-radius: 20px; font-weight: bold; font-size: 1rem;
+            z-index: 10;
+        }
+        .status-ok { background-color: rgba(40, 167, 69, 0.9); color: white; }
+        .status-ng { background-color: rgba(220, 53, 69, 0.9); color: white; }
+
+        /* 警告画面（グレーアウト） */
+        .warning-mask {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex; justify-content: center; align-items: center;
+            color: white; font-size: 1.5rem; font-weight: bold;
+            display: none; /* デフォルトは非表示 */
+        }
+
         .info-panel { 
             position: fixed; bottom: 0; left: 0; width: 100%; 
             background: rgba(255, 255, 255, 0.95); padding: 15px 0 30px 0; 
@@ -25,38 +42,13 @@
         }
         h1 { font-size: 1.1rem; color: #333; margin: 0 0 15px 0; font-weight: bold; }
         
-        /* 記録表示用のグリッドレイアウト */
-        .record-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            width: 90%;
-            max-width: 400px;
-        }
-        .record-box {
-            background: #eef2f6;
-            padding: 10px;
-            border-radius: 10px;
-            text-align: center;
-        }
+        .record-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; width: 90%; max-width: 400px; }
+        .record-box { background: #eef2f6; padding: 10px; border-radius: 10px; text-align: center; }
         .record-label { font-size: 0.9rem; color: #666; display: block; margin-bottom: 5px; }
         .record-value { font-size: 2rem; font-weight: bold; color: #007bff; }
         .unit { font-size: 1rem; color: #666; }
-        
-        /* 現在値は少し小さく表示（確認用） */
         .current-value { font-size: 0.9rem; color: #999; margin-top: 10px; }
-
-        /* リセットボタン */
-        .reset-btn {
-            margin-top: 15px;
-            padding: 8px 20px;
-            background-color: #6c757d;
-            color: white;
-            border: none;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            cursor: pointer;
-        }
+        .reset-btn { margin-top: 15px; padding: 8px 20px; background-color: #6c757d; color: white; border: none; border-radius: 20px; font-size: 0.9rem; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -64,23 +56,23 @@
     <div class="container">
         <video id="input_video" playsinline></video>
         <canvas id="output_canvas"></canvas>
+        <div id="status_msg" class="status-overlay status-ng">準備中...</div>
+        <div id="warning_mask" class="warning-mask">
+            <div>前腕を中間位に<br>してください</div>
+        </div>
     </div>
     
     <div class="info-panel">
-        <h1>示指PIP関節</h1>
+        <h1>示指PIP関節 (中間位測定)</h1>
         
         <div class="record-grid">
             <div class="record-box">
                 <span class="record-label">屈曲 (MAX)</span>
-                <div>
-                    <span id="max_flexion" class="record-value">0</span><span class="unit">°</span>
-                </div>
+                <div><span id="max_flexion" class="record-value">0</span><span class="unit">°</span></div>
             </div>
             <div class="record-box">
                 <span class="record-label">伸展 (MAX)</span>
-                <div>
-                    <span id="max_extension" class="record-value">--</span><span class="unit">°</span>
-                </div>
+                <div><span id="max_extension" class="record-value">--</span><span class="unit">°</span></div>
             </div>
         </div>
 
@@ -92,21 +84,17 @@
     const videoElement = document.getElementById('input_video');
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
-    
-    // UI要素
     const elMaxFlexion = document.getElementById('max_flexion');
     const elMaxExtension = document.getElementById('max_extension');
     const elCurrentAngle = document.getElementById('current_angle');
+    const elStatusMsg = document.getElementById('status_msg');
+    const elWarningMask = document.getElementById('warning_mask');
 
-    // 記録用変数
     let maxFlexionVal = 0;
-    let maxExtensionVal = 999; // 最初はありえない大きな値にしておく
-
-    // スムージング用
+    let maxExtensionVal = 999;
     let angleHistory = [];
     const SMOOTHING_FRAMES = 5;
 
-    // リセット機能
     function resetRecords() {
         maxFlexionVal = 0;
         maxExtensionVal = 999;
@@ -115,13 +103,68 @@
         angleHistory = [];
     }
 
-    // 角度計算 (0度基準)
     function calculateAngle(a, b, c) {
         const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
         let angle = Math.abs(radians * 180.0 / Math.PI);
         if (angle > 180.0) angle = 360 - angle;
         return 180 - angle;
     }
+
+    // ★前腕中間位の判定ロジック
+    // 親指の付け根(2)と小指の付け根(17)のY座標の差を見る
+    // 中間位ならYの差が大きく（縦並び）、回内ならXの差が大きくなる（横並び）
+    function isNeutralPosition(landmarks) {
+        const thumbBase = landmarks[2]; // 親指CM/MP付近
+        const pinkyBase = landmarks[17]; // 小指MP
+
+        const xDiff = Math.abs(thumbBase.x - pinkyBase.x);
+        const yDiff = Math.abs(thumbBase.y - pinkyBase.y);
+
+        // 縦（Y差）が横（X差）よりも十分に大きい場合を「中間位」とみなす
+        // 比率は調整可能だが、ここでは Y差 > X差 * 1.5 とする
+        return yDiff > (xDiff * 1.2); 
+    }
+
+    // ★茎状突起ライン（仮想）の描画
+    function drawWristLine(ctx, wrist, indexBase, width, height) {
+        const wx = wrist.x * width;
+        const wy = wrist.y * height;
+        const ix = indexBase.x * width;
+        const iy = indexBase.y * height;
+
+        // 手首から人差し指へのベクトル
+        const dx = ix - wx;
+        const dy = iy - wy;
+
+        // 垂直ベクトル（90度回転）
+        const perpX = -dy;
+        const perpY = dx;
+
+        // 長さを正規化して適当な長さに
+        const len = Math.sqrt(perpX*perpX + perpY*perpY);
+        const scale = 60; // ラインの長さ（片側）
+        const nx = (perpX / len) * scale;
+        const ny = (perpY / len) * scale;
+
+        // 線を描画
+        ctx.beginPath();
+        ctx.moveTo(wx - nx, wy - ny);
+        ctx.lineTo(wx + nx, wy + ny);
+        ctx.strokeStyle = "#00FFFF"; // 水色
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        // 仮想の茎状突起ポイント
+        ctx.fillStyle = "#00FFFF";
+        ctx.beginPath(); ctx.arc(wx - nx, wy - ny, 5, 0, 2*Math.PI); ctx.fill();
+        ctx.beginPath(); ctx.arc(wx + nx, wy + ny, 5, 0, 2*Math.PI); ctx.fill();
+        
+        // 文字ラベル
+        ctx.font = "12px Arial";
+        ctx.fillStyle = "white";
+        ctx.fillText("尺骨/橈骨想定線", wx + 10, wy + 20);
+    }
+
 
     function onResults(results) {
         canvasElement.width = videoElement.videoWidth;
@@ -130,38 +173,44 @@
         canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
         canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-        if (results.multiHandLandmarks) {
-            for (const landmarks of results.multiHandLandmarks) {
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const landmarks = results.multiHandLandmarks[0];
+
+            // 1. 中間位チェック
+            const isNeutral = isNeutralPosition(landmarks);
+
+            if (isNeutral) {
+                // OKの状態
+                elStatusMsg.innerText = "測定中 (中間位OK)";
+                elStatusMsg.className = "status-overlay status-ok";
+                elWarningMask.style.display = "none"; // マスク解除
+
                 drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
                 drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1});
 
-                // 人差し指 PIP (5, 6, 7)
+                // 2. 茎状突起ライン描画 (手首=0, 人差し指MP=5)
+                drawWristLine(canvasCtx, landmarks[0], landmarks[5], canvasElement.width, canvasElement.height);
+
+                // 3. 角度計算
                 const rawAngle = calculateAngle(landmarks[5], landmarks[6], landmarks[7]);
                 
-                // スムージング
                 angleHistory.push(rawAngle);
                 if (angleHistory.length > SMOOTHING_FRAMES) angleHistory.shift();
                 let avgAngle = angleHistory.reduce((a, b) => a + b, 0) / angleHistory.length;
 
-                // ★2度単位に丸める処理 (Math.round(x / 2) * 2)
                 let displayAngle = Math.round(avgAngle / 2) * 2;
 
-                // ★MAX記録更新ロジック
                 if (displayAngle > maxFlexionVal) {
                     maxFlexionVal = displayAngle;
                     elMaxFlexion.innerText = maxFlexionVal;
                 }
-                // 伸展は「値が小さいほど」MAX（伸びている）
-                // ただしノイズで0以下になるのを防ぐため、一旦記録開始条件をつける
                 if (displayAngle < maxExtensionVal) {
                     maxExtensionVal = displayAngle;
                     elMaxExtension.innerText = maxExtensionVal;
                 }
-
-                // 現在値の表示
                 elCurrentAngle.innerText = displayAngle;
 
-                // 画面上の描画
+                // 角度描画
                 const textX = landmarks[6].x * canvasElement.width;
                 const textY = landmarks[6].y * canvasElement.height;
                 canvasCtx.fillStyle = "rgba(0, 0, 0, 0.6)";
@@ -173,7 +222,22 @@
                 canvasCtx.textAlign = "center";
                 canvasCtx.textBaseline = "middle";
                 canvasCtx.fillText(displayAngle + "°", textX, textY);
+
+            } else {
+                // NGの状態（中間位ではない）
+                elStatusMsg.innerText = "角度不正";
+                elStatusMsg.className = "status-overlay status-ng";
+                elWarningMask.style.display = "flex"; // マスク表示
+
+                // 骨格は薄く表示
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: 'rgba(200,200,200,0.3)', lineWidth: 1});
             }
+
+        } else {
+            // 手が見つからない
+            elStatusMsg.innerText = "手を映してください";
+            elStatusMsg.className = "status-overlay status-ng";
+            elWarningMask.style.display = "none";
         }
         canvasCtx.restore();
     }
@@ -200,27 +264,15 @@
     }
     startCamera();
 
-    // ★常時点灯（スリープ防止）処理 Wake Lock API
+    // Wake Lock
     let wakeLock = null;
     async function requestWakeLock() {
-        try {
-            wakeLock = await navigator.wakeLock.request('screen');
-            console.log('画面スリープを無効化しました');
-            wakeLock.addEventListener('release', () => {
-                console.log('画面スリープ防止が解除されました');
-            });
-        } catch (err) {
-            console.error(`${err.name}, ${err.message}`);
-        }
+        try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
     }
-    // ページ読み込み時と、タブがアクティブになった時に再要求
     requestWakeLock();
     document.addEventListener('visibilitychange', async () => {
-        if (wakeLock !== null && document.visibilityState === 'visible') {
-            await requestWakeLock();
-        }
+        if (wakeLock !== null && document.visibilityState === 'visible') await requestWakeLock();
     });
-
 </script>
 </body>
 </html>
