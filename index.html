@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v8</title>
+    <title>AI手指可動域検査アシスト v9</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -15,73 +15,49 @@
         video { display: none; }
         canvas { width: 100%; height: auto; display: block; }
         
-        /* ★固定ガイドライン（縦線に変更） */
-        .static-guide {
-            position: absolute;
-            top: 25%; /* 画面の上の方から開始 */
-            left: 50%;
-            width: 4px; /* 縦線なので幅を細く */
-            height: 35vh; /* 画面の約1/3の長さ */
-            background: rgba(0, 255, 255, 0.5); /* 水色 */
-            transform: translateX(-50%); /* 左右中央揃え */
-            pointer-events: none;
-            z-index: 5;
-            border-radius: 2px;
+        /* スタートボタンとオーバーレイ */
+        .overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 20;
+            color: white;
         }
+        .start-btn {
+            padding: 15px 40px; font-size: 1.5rem; font-weight: bold;
+            background-color: #007bff; color: white; border: none; border-radius: 50px;
+            cursor: pointer; box-shadow: 0 4px 15px rgba(0,123,255,0.5);
+            transition: transform 0.2s;
+        }
+        .start-btn:active { transform: scale(0.95); }
         
-        /* ガイドの文言 */
-        .static-guide::after {
-            content: "橈骨の茎状突起と前腕の\A位置を合わせてください"; /* \Aは改行 */
-            white-space: pre; /* 改行を有効化 */
-            position: absolute; 
-            top: -60px; /* 線の上に文字を表示 */
-            left: 50%; 
-            transform: translateX(-50%);
-            color: rgba(0, 255, 255, 0.9); 
-            font-weight: bold; 
-            font-size: 1rem;
-            text-shadow: 1px 1px 3px black;
-            width: 300px;
-            line-height: 1.4;
+        /* 計測中のステータス表示 */
+        .status-display {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7); padding: 10px 20px; border-radius: 30px;
+            color: #00ff00; font-size: 1.2rem; font-weight: bold;
+            z-index: 10; display: none; white-space: nowrap;
         }
 
-        /* 手首の位置マーカー（縦線の下に配置） */
-        .wrist-marker {
-            position: absolute; 
-            top: 60%; /* 縦線の終わりの位置（25% + 35%） */
-            left: 50%; 
-            width: 24px; height: 24px;
-            background: rgba(255, 0, 0, 0.6);
-            border: 2px solid white; border-radius: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 6;
-            box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+        /* 結果表示パネル（全画面） */
+        .result-panel {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: white; z-index: 30; overflow-y: auto;
+            display: none; padding-bottom: 50px;
         }
-        .wrist-marker::after {
-            content: "手首（茎状突起）";
-            position: absolute; top: 30px; left: 50%; transform: translateX(-50%);
-            color: white; font-size: 0.8rem; white-space: nowrap;
-            text-shadow: 1px 1px 2px black;
-        }
-
-        /* 下部パネル */
-        .info-panel { 
-            position: fixed; bottom: 0; left: 0; width: 100%; 
-            background: rgba(255, 255, 255, 0.95); padding: 10px 0 20px 0; 
-            border-top-left-radius: 20px; border-top-right-radius: 20px;
-            box-shadow: 0 -4px 10px rgba(0,0,0,0.1);
-        }
-        h1 { font-size: 1rem; color: #333; margin: 0 0 10px 0; font-weight: bold; }
-
-        /* テーブルデザイン */
-        .rom-table { width: 95%; margin: 0 auto; border-collapse: collapse; font-size: 0.9rem; }
-        .rom-table th { background: #e9ecef; padding: 8px; border-radius: 5px; color: #495057; }
-        .rom-table td { padding: 5px; text-align: center; border-bottom: 1px solid #dee2e6; }
-        .joint-name { font-weight: bold; color: #333; }
-        .val-box { font-size: 1.4rem; font-weight: bold; color: #007bff; }
-        .max-val { font-size: 0.9rem; color: #666; }
+        .result-header { background: #007bff; color: white; padding: 15px; font-size: 1.2rem; font-weight: bold; }
         
-        .reset-btn { margin-top: 10px; padding: 6px 20px; background-color: #6c757d; color: white; border: none; border-radius: 20px; cursor: pointer; }
+        /* 結果テーブル */
+        .result-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
+        .result-table th, .result-table td { border: 1px solid #ddd; padding: 6px 4px; text-align: center; }
+        .result-table th { background-color: #f2f2f2; color: #333; }
+        .finger-row { background-color: #eef2f6; font-weight: bold; }
+        .joint-label { font-size: 0.8rem; color: #666; }
+        
+        .restart-btn {
+            margin: 20px auto; padding: 10px 30px; background: #6c757d; color: white;
+            border: none; border-radius: 5px; font-size: 1rem; display: block;
+        }
     </style>
 </head>
 <body>
@@ -90,69 +66,104 @@
         <video id="input_video" playsinline></video>
         <canvas id="output_canvas"></canvas>
         
-        <div class="static-guide"></div>
-        <div class="wrist-marker"></div>
-    </div>
-    
-    <div class="info-panel">
-        <h1>示指 3関節同時測定</h1>
-        
-        <table class="rom-table">
-            <thead>
-                <tr>
-                    <th>関節</th>
-                    <th>現在</th>
-                    <th>屈曲MAX</th>
-                    <th>伸展MAX</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td class="joint-name">MP</td>
-                    <td><span id="mp_now" class="val-box">--</span></td>
-                    <td><span id="mp_flex" class="max-val">0</span></td>
-                    <td><span id="mp_ext" class="max-val">--</span></td>
-                </tr>
-                <tr>
-                    <td class="joint-name">PIP</td>
-                    <td><span id="pip_now" class="val-box">--</span></td>
-                    <td><span id="pip_flex" class="max-val">0</span></td>
-                    <td><span id="pip_ext" class="max-val">--</span></td>
-                </tr>
-                <tr>
-                    <td class="joint-name">DIP</td>
-                    <td><span id="dip_now" class="val-box">--</span></td>
-                    <td><span id="dip_flex" class="max-val">0</span></td>
-                    <td><span id="dip_ext" class="max-val">--</span></td>
-                </tr>
-            </tbody>
-        </table>
+        <div id="start_overlay" class="overlay">
+            <p style="margin-bottom:20px;">手をカメラに向けてください</p>
+            <button class="start-btn" onclick="startMeasurementSequence()">計測スタート</button>
+        </div>
 
-        <button class="reset-btn" onclick="resetRecords()">記録リセット</button>
+        <div id="status_display" class="status-display"></div>
+    </div>
+
+    <div id="result_panel" class="result-panel">
+        <div class="result-header">計測結果</div>
+        <table class="result-table" id="result_table_body">
+            </table>
+        <button class="restart-btn" onclick="location.reload()">もう一度計測する</button>
     </div>
 
 <script>
     const videoElement = document.getElementById('input_video');
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
+    const startOverlay = document.getElementById('start_overlay');
+    const statusDisplay = document.getElementById('status_display');
+    const resultPanel = document.getElementById('result_panel');
+    const resultTableBody = document.getElementById('result_table_body');
 
-    const joints = {
-        mp:  { now: 0, flex: 0, ext: 999, history: [] },
-        pip: { now: 0, flex: 0, ext: 999, history: [] },
-        dip: { now: 0, flex: 0, ext: 999, history: [] }
+    // 状態管理: 'idle', 'phase1' (4指), 'interval', 'phase2' (母指), 'finished'
+    let currentState = 'idle';
+    
+    // データ保持用 (Max=屈曲, Min=伸展)
+    // 初期値: Flex(屈曲)は0からスタートして最大値を更新、Ext(伸展)は180からスタートして最小値を更新
+    const fingersData = {
+        thumb:  { name:"母指", joints: { cm:{flex:0, ext:180}, mp:{flex:0, ext:180}, ip:{flex:0, ext:180} } },
+        index:  { name:"示指", joints: { mp:{flex:0, ext:180}, pip:{flex:0, ext:180}, dip:{flex:0, ext:180} } },
+        middle: { name:"中指", joints: { mp:{flex:0, ext:180}, pip:{flex:0, ext:180}, dip:{flex:0, ext:180} } },
+        ring:   { name:"環指", joints: { mp:{flex:0, ext:180}, pip:{flex:0, ext:180}, dip:{flex:0, ext:180} } },
+        pinky:  { name:"小指", joints: { mp:{flex:0, ext:180}, pip:{flex:0, ext:180}, dip:{flex:0, ext:180} } }
     };
-    const SMOOTHING_FRAMES = 5;
 
-    function resetRecords() {
-        ['mp', 'pip', 'dip'].forEach(key => {
-            joints[key].flex = 0;
-            joints[key].ext = 999;
-            joints[key].history = [];
-            document.getElementById(`${key}_flex`).innerText = "0";
-            document.getElementById(`${key}_ext`).innerText = "--";
-        });
+    // 音声読み上げ関数
+    function speak(text) {
+        const uttr = new SpeechSynthesisUtterance(text);
+        uttr.lang = "ja-JP";
+        uttr.rate = 1.0;
+        speechSynthesis.speak(uttr);
     }
 
+    // ★計測シーケンス開始
+    function startMeasurementSequence() {
+        startOverlay.style.display = 'none';
+        statusDisplay.style.display = 'block';
+        
+        speak("計測を開始します。スタートポジションに合わせてください。では10秒間、4本の指を動かしてみてください");
+        statusDisplay.innerText = "4指 計測中 (あと10秒)";
+        
+        // 少し待ってから計測開始
+        setTimeout(() => {
+            currentState = 'phase1';
+            let timeLeft = 10;
+            const timer = setInterval(() => {
+                timeLeft--;
+                statusDisplay.innerText = `4指 計測中 (あと${timeLeft}秒)`;
+                if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    currentState = 'interval';
+                    startPhase2();
+                }
+            }, 1000);
+        }, 3000); // アナウンス待ち
+    }
+
+    // ★フェーズ2（母指）へ
+    function startPhase2() {
+        speak("次に、前腕を回外してください。そして母指を5秒間動かしてください");
+        statusDisplay.innerText = "準備中...";
+        
+        setTimeout(() => {
+            currentState = 'phase2';
+            let timeLeft = 5;
+            statusDisplay.innerText = `母指 計測中 (あと${timeLeft}秒)`;
+            const timer = setInterval(() => {
+                timeLeft--;
+                statusDisplay.innerText = `母指 計測中 (あと${timeLeft}秒)`;
+                if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    finishMeasurement();
+                }
+            }, 1000);
+        }, 4000);
+    }
+
+    // ★計測終了
+    function finishMeasurement() {
+        currentState = 'finished';
+        speak("お疲れ様でした。計測は終了です");
+        statusDisplay.style.display = 'none';
+        showResults();
+    }
+
+    // 角度計算
     function calculateAngle(a, b, c) {
         const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
         let angle = Math.abs(radians * 180.0 / Math.PI);
@@ -160,26 +171,16 @@
         return 180 - angle;
     }
 
-    function updateJoint(key, p1, p2, p3) {
-        const rawAngle = calculateAngle(p1, p2, p3);
-        const j = joints[key];
+    // データ更新処理
+    function updateJointData(fingerKey, jointKey, angle) {
+        const j = fingersData[fingerKey].joints[jointKey];
+        // 2度単位に丸める
+        const val = Math.round(angle / 2) * 2;
         
-        j.history.push(rawAngle);
-        if (j.history.length > SMOOTHING_FRAMES) j.history.shift();
-        const avg = j.history.reduce((a, b) => a + b, 0) / j.history.length;
-        
-        const displayVal = Math.round(avg / 2) * 2;
-        
-        document.getElementById(`${key}_now`).innerText = displayVal;
-        
-        if (displayVal > j.flex) {
-            j.flex = displayVal;
-            document.getElementById(`${key}_flex`).innerText = j.flex;
-        }
-        if (displayVal < j.ext) {
-            j.ext = displayVal;
-            document.getElementById(`${key}_ext`).innerText = j.ext;
-        }
+        // 最大値（屈曲）更新
+        if (val > j.flex) j.flex = val;
+        // 最小値（伸展）更新
+        if (val < j.ext) j.ext = val;
     }
 
     function onResults(results) {
@@ -189,26 +190,96 @@
         canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
         canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-        if (results.multiHandLandmarks) {
-            for (const landmarks of results.multiHandLandmarks) {
-                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
-                drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1});
-                
-                updateJoint('mp',  landmarks[0], landmarks[5], landmarks[6]);
-                updateJoint('pip', landmarks[5], landmarks[6], landmarks[7]);
-                updateJoint('dip', landmarks[6], landmarks[7], landmarks[8]);
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const lm = results.multiHandLandmarks[0];
+            drawConnectors(canvasCtx, lm, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+            drawLandmarks(canvasCtx, lm, {color: '#FF0000', lineWidth: 1});
+
+            // ★フェーズ1: 4指 (Index, Middle, Ring, Pinky)
+            if (currentState === 'phase1') {
+                // Index(示指)
+                updateJointData('index', 'mp',  calculateAngle(lm[0], lm[5], lm[6]));
+                updateJointData('index', 'pip', calculateAngle(lm[5], lm[6], lm[7]));
+                updateJointData('index', 'dip', calculateAngle(lm[6], lm[7], lm[8]));
+                // Middle(中指)
+                updateJointData('middle', 'mp',  calculateAngle(lm[0], lm[9], lm[10]));
+                updateJointData('middle', 'pip', calculateAngle(lm[9], lm[10], lm[11]));
+                updateJointData('middle', 'dip', calculateAngle(lm[10], lm[11], lm[12]));
+                // Ring(環指)
+                updateJointData('ring', 'mp',  calculateAngle(lm[0], lm[13], lm[14]));
+                updateJointData('ring', 'pip', calculateAngle(lm[13], lm[14], lm[15]));
+                updateJointData('ring', 'dip', calculateAngle(lm[14], lm[15], lm[16]));
+                // Pinky(小指)
+                updateJointData('pinky', 'mp',  calculateAngle(lm[0], lm[17], lm[18]));
+                updateJointData('pinky', 'pip', calculateAngle(lm[17], lm[18], lm[19]));
+                updateJointData('pinky', 'dip', calculateAngle(lm[18], lm[19], lm[20]));
+            }
+
+            // ★フェーズ2: 母指 (Thumb)
+            if (currentState === 'phase2') {
+                // Thumb
+                // CM: Wrist(0)-CMC(1)-MCP(2) ※簡易計測
+                updateJointData('thumb', 'cm', calculateAngle(lm[0], lm[1], lm[2])); 
+                // MP: CMC(1)-MCP(2)-IP(3)
+                updateJointData('thumb', 'mp', calculateAngle(lm[1], lm[2], lm[3]));
+                // IP: MCP(2)-IP(3)-Tip(4)
+                updateJointData('thumb', 'ip', calculateAngle(lm[2], lm[3], lm[4]));
             }
         }
         canvasCtx.restore();
     }
 
+    // 結果表示生成
+    function showResults() {
+        resultPanel.style.display = 'block';
+        let html = `
+            <thead>
+                <tr>
+                    <th>指</th>
+                    <th>関節</th>
+                    <th>屈曲</th>
+                    <th>伸展</th>
+                    <th>TAM</th>
+                </tr>
+            </thead>
+            <tbody>
+        `;
+
+        // 母指の行生成
+        const t = fingersData.thumb;
+        // TAM (MP+IP) = (MP屈-MP伸) + (IP屈-IP伸)
+        const t_mp_range = Math.max(0, t.joints.mp.flex - t.joints.mp.ext);
+        const t_ip_range = Math.max(0, t.joints.ip.flex - t.joints.ip.ext);
+        const t_tam = t_mp_range + t_ip_range;
+
+        html += `
+            <tr class="finger-row"><td rowspan="3">${t.name}</td><td>CM</td><td>${t.joints.cm.flex}°</td><td>${t.joints.cm.ext}°</td><td>-</td></tr>
+            <tr class="finger-row"><td>MP</td><td>${t.joints.mp.flex}°</td><td>${t.joints.mp.ext}°</td><td rowspan="2">${t_tam}°</td></tr>
+            <tr class="finger-row"><td>IP</td><td>${t.joints.ip.flex}°</td><td>${t.joints.ip.ext}°</td></tr>
+        `;
+
+        // 他4指の行生成
+        const others = ['index', 'middle', 'ring', 'pinky'];
+        others.forEach(key => {
+            const f = fingersData[key];
+            const mp_r = Math.max(0, f.joints.mp.flex - f.joints.mp.ext);
+            const pip_r = Math.max(0, f.joints.pip.flex - f.joints.pip.ext);
+            const dip_r = Math.max(0, f.joints.dip.flex - f.joints.dip.ext);
+            const tam = mp_r + pip_r + dip_r;
+
+            html += `
+                <tr><td rowspan="3">${f.name}</td><td>MP</td><td>${f.joints.mp.flex}°</td><td>${f.joints.mp.ext}°</td><td rowspan="3">${tam}°</td></tr>
+                <tr><td>PIP</td><td>${f.joints.pip.flex}°</td><td>${f.joints.pip.ext}°</td></tr>
+                <tr><td>DIP</td><td>${f.joints.dip.flex}°</td><td>${f.joints.dip.ext}°</td></tr>
+            `;
+        });
+
+        html += `</tbody>`;
+        resultTableBody.innerHTML = html;
+    }
+
     const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-    hands.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-    });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     hands.onResults(onResults);
 
     async function startCamera() {
