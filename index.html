@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v7</title>
+    <title>AI手指可動域検査アシスト v8</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -15,38 +15,56 @@
         video { display: none; }
         canvas { width: 100%; height: auto; display: block; }
         
-        /* ★固定ガイドライン（前腕合わせ用） */
+        /* ★固定ガイドライン（縦線に変更） */
         .static-guide {
             position: absolute;
-            top: 50%; left: 0; width: 100%; height: 4px;
-            background: rgba(0, 255, 255, 0.4); /* 水色のライン */
-            transform: translateY(-50%);
+            top: 25%; /* 画面の上の方から開始 */
+            left: 50%;
+            width: 4px; /* 縦線なので幅を細く */
+            height: 35vh; /* 画面の約1/3の長さ */
+            background: rgba(0, 255, 255, 0.5); /* 水色 */
+            transform: translateX(-50%); /* 左右中央揃え */
             pointer-events: none;
             z-index: 5;
+            border-radius: 2px;
         }
+        
+        /* ガイドの文言 */
         .static-guide::after {
-            content: "この線に前腕（橈骨）を合わせてください";
-            position: absolute; top: -30px; left: 50%; transform: translateX(-50%);
-            color: rgba(0, 255, 255, 0.8); font-weight: bold; font-size: 0.9rem;
-            text-shadow: 1px 1px 2px black;
-            width: 100%;
-        }
-        /* 手首の位置マーカー */
-        .wrist-marker {
-            position: absolute; top: 50%; right: 15%; /* 画面右寄りに手首を置く想定 */
-            width: 20px; height: 20px;
-            background: rgba(255, 0, 0, 0.5);
-            border: 2px solid white; border-radius: 50%;
-            transform: translate(50%, -50%);
-            z-index: 6;
-        }
-        .wrist-marker::after {
-            content: "手首";
-            position: absolute; top: 25px; left: 50%; transform: translateX(-50%);
-            color: white; font-size: 0.8rem;
+            content: "橈骨の茎状突起と前腕の\A位置を合わせてください"; /* \Aは改行 */
+            white-space: pre; /* 改行を有効化 */
+            position: absolute; 
+            top: -60px; /* 線の上に文字を表示 */
+            left: 50%; 
+            transform: translateX(-50%);
+            color: rgba(0, 255, 255, 0.9); 
+            font-weight: bold; 
+            font-size: 1rem;
+            text-shadow: 1px 1px 3px black;
+            width: 300px;
+            line-height: 1.4;
         }
 
-        /* 下部パネル（3関節表示用に拡張） */
+        /* 手首の位置マーカー（縦線の下に配置） */
+        .wrist-marker {
+            position: absolute; 
+            top: 60%; /* 縦線の終わりの位置（25% + 35%） */
+            left: 50%; 
+            width: 24px; height: 24px;
+            background: rgba(255, 0, 0, 0.6);
+            border: 2px solid white; border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 6;
+            box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+        }
+        .wrist-marker::after {
+            content: "手首（茎状突起）";
+            position: absolute; top: 30px; left: 50%; transform: translateX(-50%);
+            color: white; font-size: 0.8rem; white-space: nowrap;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        /* 下部パネル */
         .info-panel { 
             position: fixed; bottom: 0; left: 0; width: 100%; 
             background: rgba(255, 255, 255, 0.95); padding: 10px 0 20px 0; 
@@ -56,15 +74,12 @@
         h1 { font-size: 1rem; color: #333; margin: 0 0 10px 0; font-weight: bold; }
 
         /* テーブルデザイン */
-        .rom-table {
-            width: 95%; margin: 0 auto; border-collapse: collapse; font-size: 0.9rem;
-        }
+        .rom-table { width: 95%; margin: 0 auto; border-collapse: collapse; font-size: 0.9rem; }
         .rom-table th { background: #e9ecef; padding: 8px; border-radius: 5px; color: #495057; }
         .rom-table td { padding: 5px; text-align: center; border-bottom: 1px solid #dee2e6; }
         .joint-name { font-weight: bold; color: #333; }
         .val-box { font-size: 1.4rem; font-weight: bold; color: #007bff; }
         .max-val { font-size: 0.9rem; color: #666; }
-        .unit { font-size: 0.8rem; color: #888; }
         
         .reset-btn { margin-top: 10px; padding: 6px 20px; background-color: #6c757d; color: white; border: none; border-radius: 20px; cursor: pointer; }
     </style>
@@ -121,7 +136,6 @@
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
 
-    // データ保持用オブジェクト
     const joints = {
         mp:  { now: 0, flex: 0, ext: 999, history: [] },
         pip: { now: 0, flex: 0, ext: 999, history: [] },
@@ -139,7 +153,6 @@
         });
     }
 
-    // 角度計算 (0度基準)
     function calculateAngle(a, b, c) {
         const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
         let angle = Math.abs(radians * 180.0 / Math.PI);
@@ -155,13 +168,10 @@
         if (j.history.length > SMOOTHING_FRAMES) j.history.shift();
         const avg = j.history.reduce((a, b) => a + b, 0) / j.history.length;
         
-        // 2度単位
         const displayVal = Math.round(avg / 2) * 2;
         
-        // 更新
         document.getElementById(`${key}_now`).innerText = displayVal;
         
-        // MAX記録
         if (displayVal > j.flex) {
             j.flex = displayVal;
             document.getElementById(`${key}_flex`).innerText = j.flex;
@@ -183,11 +193,6 @@
             for (const landmarks of results.multiHandLandmarks) {
                 drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
                 drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1});
-
-                // 人差し指の関節: 
-                // MP  = Wrist(0) -> MP(5) -> PIP(6)
-                // PIP = MP(5)    -> PIP(6) -> DIP(7)
-                // DIP = PIP(6)   -> DIP(7) -> Tip(8)
                 
                 updateJoint('mp',  landmarks[0], landmarks[5], landmarks[6]);
                 updateJoint('pip', landmarks[5], landmarks[6], landmarks[7]);
