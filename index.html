@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v3</title>
+    <title>AI手指可動域検査アシスト v4</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -15,15 +15,48 @@
         video { display: none; }
         canvas { width: 100%; height: auto; display: block; }
         
+        /* 下部のパネルデザイン変更 */
         .info-panel { 
             position: fixed; bottom: 0; left: 0; width: 100%; 
-            background: rgba(255, 255, 255, 0.95); padding: 20px 0; 
+            background: rgba(255, 255, 255, 0.95); padding: 15px 0 30px 0; 
             border-top-left-radius: 20px; border-top-right-radius: 20px;
             box-shadow: 0 -4px 10px rgba(0,0,0,0.1);
+            display: flex; flex-direction: column; align-items: center;
         }
-        h1 { font-size: 1rem; color: #333; margin: 0 0 5px 0; }
-        .angle-display { font-size: 3.5rem; font-weight: bold; color: #007bff; font-feature-settings: "tnum"; }
-        .unit { font-size: 1.5rem; color: #666; }
+        h1 { font-size: 1.1rem; color: #333; margin: 0 0 15px 0; font-weight: bold; }
+        
+        /* 記録表示用のグリッドレイアウト */
+        .record-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            width: 90%;
+            max-width: 400px;
+        }
+        .record-box {
+            background: #eef2f6;
+            padding: 10px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .record-label { font-size: 0.9rem; color: #666; display: block; margin-bottom: 5px; }
+        .record-value { font-size: 2rem; font-weight: bold; color: #007bff; }
+        .unit { font-size: 1rem; color: #666; }
+        
+        /* 現在値は少し小さく表示（確認用） */
+        .current-value { font-size: 0.9rem; color: #999; margin-top: 10px; }
+
+        /* リセットボタン */
+        .reset-btn {
+            margin-top: 15px;
+            padding: 8px 20px;
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -34,27 +67,60 @@
     </div>
     
     <div class="info-panel">
-        <h1>人差し指 PIP屈曲 (安定版 v3)</h1>
-        <div class="angle-display">
-            <span id="angle_value">--</span><span class="unit">°</span>
+        <h1>示指PIP関節</h1>
+        
+        <div class="record-grid">
+            <div class="record-box">
+                <span class="record-label">屈曲 (MAX)</span>
+                <div>
+                    <span id="max_flexion" class="record-value">0</span><span class="unit">°</span>
+                </div>
+            </div>
+            <div class="record-box">
+                <span class="record-label">伸展 (MAX)</span>
+                <div>
+                    <span id="max_extension" class="record-value">--</span><span class="unit">°</span>
+                </div>
+            </div>
         </div>
+
+        <div class="current-value">現在: <span id="current_angle">--</span>°</div>
+        <button class="reset-btn" onclick="resetRecords()">記録リセット</button>
     </div>
 
 <script>
     const videoElement = document.getElementById('input_video');
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
-    const angleDisplay = document.getElementById('angle_value');
+    
+    // UI要素
+    const elMaxFlexion = document.getElementById('max_flexion');
+    const elMaxExtension = document.getElementById('max_extension');
+    const elCurrentAngle = document.getElementById('current_angle');
 
-    // ★スムージング（平均化）用の配列
+    // 記録用変数
+    let maxFlexionVal = 0;
+    let maxExtensionVal = 999; // 最初はありえない大きな値にしておく
+
+    // スムージング用
     let angleHistory = [];
-    const SMOOTHING_FRAMES = 5; // 過去5フレームの平均をとる
+    const SMOOTHING_FRAMES = 5;
 
+    // リセット機能
+    function resetRecords() {
+        maxFlexionVal = 0;
+        maxExtensionVal = 999;
+        elMaxFlexion.innerText = "0";
+        elMaxExtension.innerText = "--";
+        angleHistory = [];
+    }
+
+    // 角度計算 (0度基準)
     function calculateAngle(a, b, c) {
         const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
         let angle = Math.abs(radians * 180.0 / Math.PI);
         if (angle > 180.0) angle = 360 - angle;
-        return 180 - angle; // 屈曲角度
+        return 180 - angle;
     }
 
     function onResults(results) {
@@ -69,32 +135,44 @@
                 drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
                 drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1});
 
-                // 人差し指 (MP=5, PIP=6, DIP=7)
+                // 人差し指 PIP (5, 6, 7)
                 const rawAngle = calculateAngle(landmarks[5], landmarks[6], landmarks[7]);
                 
-                // ★数値を安定させる処理（移動平均）
+                // スムージング
                 angleHistory.push(rawAngle);
-                if (angleHistory.length > SMOOTHING_FRAMES) {
-                    angleHistory.shift(); // 古いデータを捨てる
-                }
-                // 平均値を計算
-                const averageAngle = Math.round(angleHistory.reduce((a, b) => a + b, 0) / angleHistory.length);
+                if (angleHistory.length > SMOOTHING_FRAMES) angleHistory.shift();
+                let avgAngle = angleHistory.reduce((a, b) => a + b, 0) / angleHistory.length;
 
-                // 表示更新
-                angleDisplay.innerText = averageAngle;
+                // ★2度単位に丸める処理 (Math.round(x / 2) * 2)
+                let displayAngle = Math.round(avgAngle / 2) * 2;
+
+                // ★MAX記録更新ロジック
+                if (displayAngle > maxFlexionVal) {
+                    maxFlexionVal = displayAngle;
+                    elMaxFlexion.innerText = maxFlexionVal;
+                }
+                // 伸展は「値が小さいほど」MAX（伸びている）
+                // ただしノイズで0以下になるのを防ぐため、一旦記録開始条件をつける
+                if (displayAngle < maxExtensionVal) {
+                    maxExtensionVal = displayAngle;
+                    elMaxExtension.innerText = maxExtensionVal;
+                }
+
+                // 現在値の表示
+                elCurrentAngle.innerText = displayAngle;
 
                 // 画面上の描画
                 const textX = landmarks[6].x * canvasElement.width;
                 const textY = landmarks[6].y * canvasElement.height;
-                canvasCtx.fillStyle = "rgba(255, 255, 255, 0.8)";
+                canvasCtx.fillStyle = "rgba(0, 0, 0, 0.6)";
                 canvasCtx.beginPath();
-                canvasCtx.arc(textX, textY, 40, 0, 2 * Math.PI);
+                canvasCtx.arc(textX, textY, 35, 0, 2 * Math.PI);
                 canvasCtx.fill();
-                canvasCtx.font = "bold 24px Arial";
-                canvasCtx.fillStyle = "#007bff";
+                canvasCtx.font = "bold 20px Arial";
+                canvasCtx.fillStyle = "#fff";
                 canvasCtx.textAlign = "center";
                 canvasCtx.textBaseline = "middle";
-                canvasCtx.fillText(averageAngle + "°", textX, textY);
+                canvasCtx.fillText(displayAngle + "°", textX, textY);
             }
         }
         canvasCtx.restore();
@@ -121,6 +199,28 @@
         } catch (e) { alert("カメラエラー: " + e.message); }
     }
     startCamera();
+
+    // ★常時点灯（スリープ防止）処理 Wake Lock API
+    let wakeLock = null;
+    async function requestWakeLock() {
+        try {
+            wakeLock = await navigator.wakeLock.request('screen');
+            console.log('画面スリープを無効化しました');
+            wakeLock.addEventListener('release', () => {
+                console.log('画面スリープ防止が解除されました');
+            });
+        } catch (err) {
+            console.error(`${err.name}, ${err.message}`);
+        }
+    }
+    // ページ読み込み時と、タブがアクティブになった時に再要求
+    requestWakeLock();
+    document.addEventListener('visibilitychange', async () => {
+        if (wakeLock !== null && document.visibilityState === 'visible') {
+            await requestWakeLock();
+        }
+    });
+
 </script>
 </body>
 </html>
