@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v17</title>
+    <title>AI手指可動域検査アシスト v19</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -53,6 +53,17 @@
             box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         }
 
+        /* ★キャンセルボタン */
+        .cancel-btn {
+            position: fixed; top: 20px; right: 20px;
+            background: rgba(220, 53, 69, 0.9);
+            color: white; border: none; padding: 10px 20px;
+            border-radius: 20px; font-weight: bold; font-size: 1rem;
+            z-index: 200; cursor: pointer; display: none; /* 初期は非表示 */
+            box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+        }
+        .cancel-btn:active { transform: scale(0.95); }
+
         .result-panel {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: white; z-index: 10000; overflow-y: auto;
@@ -90,6 +101,8 @@
     </div>
 
     <div id="status_display" class="status-display"></div>
+    
+    <button id="cancel_btn" class="cancel-btn" onclick="forceFinish()">■ 計測終了</button>
 
     <div class="container">
         <video id="input_video" playsinline muted autoplay></video>
@@ -108,6 +121,7 @@
     const canvasCtx = canvasElement.getContext('2d');
     const startOverlay = document.getElementById('start_overlay');
     const statusDisplay = document.getElementById('status_display');
+    const cancelBtn = document.getElementById('cancel_btn');
     const resultPanel = document.getElementById('result_panel');
     const resultContainer = document.getElementById('result_container');
 
@@ -116,6 +130,7 @@
     let activeData = createEmptyData();
     let passiveData = createEmptyData();
     let currentDataRef = activeData; 
+    let measurementTimer = null; // タイマーID管理用
 
     function createEmptyData() {
         return {
@@ -127,34 +142,20 @@
         };
     }
 
-    // ★修正版: フリーズ防止機能付き読み上げ
     function speakAsync(text) {
         return new Promise((resolve) => {
-            // 前の読み上げをキャンセル
-            speechSynthesis.cancel();
+            if(currentPhase === 'finished') return; // 終了済みなら喋らない
 
+            speechSynthesis.cancel();
             const uttr = new SpeechSynthesisUtterance(text);
             uttr.lang = "ja-JP";
-
-            // ★強制進行タイマー
-            // 文字数に応じた待ち時間 + 1秒バッファ。それを過ぎたら強制的に次へ進む。
+            
             const timeoutMs = (text.length * 200) + 1500;
-            const safeTimer = setTimeout(() => {
-                console.log("Speech timeout forced: moving next");
-                resolve(); // 強制完了
-            }, timeoutMs);
+            const safeTimer = setTimeout(() => { resolve(); }, timeoutMs);
 
-            uttr.onend = () => {
-                clearTimeout(safeTimer);
-                resolve(); // 正常完了
-            };
-
-            uttr.onerror = (e) => {
-                console.error(e);
-                clearTimeout(safeTimer);
-                resolve(); // エラーでも進む
-            };
-
+            uttr.onend = () => { clearTimeout(safeTimer); resolve(); };
+            uttr.onerror = () => { clearTimeout(safeTimer); resolve(); };
+            
             speechSynthesis.speak(uttr);
         });
     }
@@ -162,7 +163,7 @@
     function selectMode(mode) {
         selectedMode = mode;
         startOverlay.style.display = 'none';
-        
+        cancelBtn.style.display = 'block'; // ボタン表示
         if (mode === 'both') {
             startMeasurementSequence('active'); 
         } else {
@@ -170,7 +171,20 @@
         }
     }
 
+    // ★強制終了（キャンセル）処理
+    function forceFinish() {
+        // タイマー停止
+        if (measurementTimer) clearInterval(measurementTimer);
+        // 音声停止
+        speechSynthesis.cancel();
+        
+        // 即座に終了状態へ
+        finishAll();
+    }
+
     async function startMeasurementSequence(type) {
+        if(currentPhase === 'finished') return;
+
         statusDisplay.style.display = 'block';
         currentDataRef = (type === 'active') ? activeData : passiveData;
         
@@ -183,49 +197,53 @@
         
         statusDisplay.innerText = "アナウンス中...";
         await speakAsync(introText);
+        if(currentPhase === 'finished') return; // キャンセルされていたら中断
         
         await speakAsync("それでは、計測を開始します。10秒間、4本の指を動かしてください。");
-        
-        // 計測開始
+        if(currentPhase === 'finished') return;
+
         currentPhase = 'measuring_4fingers';
         let timeLeft = 10;
         
-        const timer = setInterval(() => {
+        measurementTimer = setInterval(() => {
             statusDisplay.innerText = (type === 'active' ? "自動" : "他動") + `: 4指 計測中 (${timeLeft})`;
             timeLeft--;
             if (timeLeft < 0) {
-                clearInterval(timer);
+                clearInterval(measurementTimer);
                 startThumbSequence(type);
             }
         }, 1000);
     }
 
     async function startThumbSequence(type) {
+        if(currentPhase === 'finished') return;
+
         currentPhase = 'idle';
         statusDisplay.innerText = "準備中...";
-        
         await speakAsync("次に、前腕を回外してください。そして母指を5秒間動かしてください。");
+        if(currentPhase === 'finished') return;
         
         currentPhase = 'measuring_thumb';
         let timeLeft = 5;
-        const timer = setInterval(() => {
+        measurementTimer = setInterval(() => {
             statusDisplay.innerText = (type === 'active' ? "自動" : "他動") + `: 母指 計測中 (${timeLeft})`;
             timeLeft--;
             if (timeLeft < 0) {
-                clearInterval(timer);
+                clearInterval(measurementTimer);
                 checkNextStep(type);
             }
         }, 1000);
     }
 
     function checkNextStep(finishedType) {
+        if(currentPhase === 'finished') return;
         currentPhase = 'idle';
         
         if (selectedMode === 'both' && finishedType === 'active') {
             speakAsync("自動運動が終了しました。続いて他動運動に移ります。").then(() => {
-                setTimeout(() => {
-                    startMeasurementSequence('passive');
-                }, 1000);
+                if(currentPhase !== 'finished') {
+                    setTimeout(() => { startMeasurementSequence('passive'); }, 1000);
+                }
             });
         } else {
             finishAll();
@@ -234,10 +252,15 @@
 
     function finishAll() {
         currentPhase = 'finished';
-        speakAsync("お疲れ様でした。計測は終了です。").then(() => {
-            statusDisplay.style.display = 'none';
-            showResults();
-        });
+        cancelBtn.style.display = 'none'; // ボタン消す
+        statusDisplay.style.display = 'none';
+
+        // 終了アナウンス（少し短めに）
+        const uttr = new SpeechSynthesisUtterance("計測を終了します。");
+        uttr.lang = "ja-JP";
+        speechSynthesis.speak(uttr);
+
+        showResults();
     }
 
     function calculateAngle(a, b, c) {
@@ -268,7 +291,7 @@
         canvasCtx.save();
         canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
         
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        if (currentPhase !== 'finished' && results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
             const targetIdx = findCenterHandIndex(results.multiHandLandmarks);
             const lm = results.multiHandLandmarks[targetIdx];
 
@@ -399,7 +422,16 @@
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
             videoElement.srcObject = stream;
-        } catch (e) { console.error(e); }
+            
+            videoElement.onloadedmetadata = () => {
+                videoElement.play();
+                const sendFrame = async () => {
+                    await hands.send({image: videoElement});
+                    requestAnimationFrame(sendFrame);
+                };
+                sendFrame();
+            };
+        } catch (e) { console.error(e); alert("カメラ起動エラー: " + e.message); }
     }
     startCamera();
 
