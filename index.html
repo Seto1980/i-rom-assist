@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v16</title>
+    <title>AI手指可動域検査アシスト v17</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -16,7 +16,6 @@
             position: relative; width: 100%; height: 100vh; overflow: hidden;
         }
         
-        /* カメラ映像を背景として常時表示 */
         video { 
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
             object-fit: cover; z-index: 1; display: block;
@@ -26,7 +25,6 @@
             object-fit: cover; z-index: 2; 
         }
         
-        /* スタート画面（半透明） */
         .overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 0, 0, 0.4); 
@@ -47,7 +45,6 @@
         .mode-btn:active { background-color: #00d2ff; color: black; transform: scale(0.98); }
         .mode-btn small { display: block; font-size: 0.8rem; font-weight: normal; margin-top: 4px; color: #ddd; }
 
-        /* 計測中のステータス表示 */
         .status-display {
             position: fixed; top: 10%; left: 50%; transform: translateX(-50%);
             background: rgba(0, 0, 0, 0.8); padding: 12px 24px; border-radius: 30px;
@@ -56,7 +53,6 @@
             box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         }
 
-        /* 結果パネル */
         .result-panel {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: white; z-index: 10000; overflow-y: auto;
@@ -98,7 +94,7 @@
     <div class="container">
         <video id="input_video" playsinline muted autoplay></video>
         <canvas id="output_canvas"></canvas>
-        </div>
+    </div>
 
     <div id="result_panel" class="result-panel">
         <div class="result-header">計測結果</div>
@@ -131,12 +127,34 @@
         };
     }
 
-    // 音声読み上げ
+    // ★修正版: フリーズ防止機能付き読み上げ
     function speakAsync(text) {
         return new Promise((resolve) => {
+            // 前の読み上げをキャンセル
+            speechSynthesis.cancel();
+
             const uttr = new SpeechSynthesisUtterance(text);
             uttr.lang = "ja-JP";
-            uttr.onend = resolve; 
+
+            // ★強制進行タイマー
+            // 文字数に応じた待ち時間 + 1秒バッファ。それを過ぎたら強制的に次へ進む。
+            const timeoutMs = (text.length * 200) + 1500;
+            const safeTimer = setTimeout(() => {
+                console.log("Speech timeout forced: moving next");
+                resolve(); // 強制完了
+            }, timeoutMs);
+
+            uttr.onend = () => {
+                clearTimeout(safeTimer);
+                resolve(); // 正常完了
+            };
+
+            uttr.onerror = (e) => {
+                console.error(e);
+                clearTimeout(safeTimer);
+                resolve(); // エラーでも進む
+            };
+
             speechSynthesis.speak(uttr);
         });
     }
@@ -152,7 +170,6 @@
         }
     }
 
-    // ★計測シーケンス
     async function startMeasurementSequence(type) {
         statusDisplay.style.display = 'block';
         currentDataRef = (type === 'active') ? activeData : passiveData;
@@ -169,7 +186,7 @@
         
         await speakAsync("それでは、計測を開始します。10秒間、4本の指を動かしてください。");
         
-        // 4指計測スタート
+        // 計測開始
         currentPhase = 'measuring_4fingers';
         let timeLeft = 10;
         
@@ -189,7 +206,6 @@
         
         await speakAsync("次に、前腕を回外してください。そして母指を5秒間動かしてください。");
         
-        // 母指計測スタート
         currentPhase = 'measuring_thumb';
         let timeLeft = 5;
         const timer = setInterval(() => {
@@ -224,7 +240,6 @@
         });
     }
 
-    // 角度計算
     function calculateAngle(a, b, c) {
         const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
         let angle = Math.abs(radians * 180.0 / Math.PI);
@@ -232,7 +247,6 @@
         return 180 - angle;
     }
 
-    // フィルタ
     function applyFilter(currentVal, newVal, jointType) {
         let alpha = 0.3; 
         if (jointType === 'dip' || jointType === 'ip') alpha = 0.15; 
@@ -255,7 +269,6 @@
         canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
         
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            // ターゲットロックなし、中央に近い手を優先
             const targetIdx = findCenterHandIndex(results.multiHandLandmarks);
             const lm = results.multiHandLandmarks[targetIdx];
 
@@ -316,12 +329,10 @@
         const tA_tam = calcTamThumb(tA);
         const tP_tam = calcTamThumb(tP);
 
-        // 母指 (白背景)
         html += generateRowThumb(tA, tP, tA_tam, tP_tam, 'CM');
         html += generateRowThumb(tA, tP, tA_tam, tP_tam, 'MP');
         html += generateRowThumb(tA, tP, tA_tam, tP_tam, 'IP');
 
-        // 4指
         ['index', 'middle', 'ring', 'pinky'].forEach(key => {
             const fA = activeData[key];
             const fP = passiveData[key];
