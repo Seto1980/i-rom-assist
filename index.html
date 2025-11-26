@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v15</title>
+    <title>AI手指可動域検査アシスト v16</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -29,10 +29,10 @@
         /* スタート画面（半透明） */
         .overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.4); /* 背景を薄くしてカメラを見せる */
+            background: rgba(0, 0, 0, 0.4); 
             display: flex; flex-direction: column; justify-content: center; align-items: center;
             z-index: 9999; color: white;
-            backdrop-filter: blur(2px); /* 少しぼかしを入れて文字を見やすく */
+            backdrop-filter: blur(2px);
         }
         
         .mode-select-container { display: flex; flex-direction: column; gap: 20px; width: 85%; max-width: 320px; }
@@ -56,20 +56,6 @@
             box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         }
 
-        /* 水色の横ライン（固定ガイド） */
-        .horizontal-guide {
-            position: absolute; top: 50%; left: 0; width: 100%; height: 2px;
-            background: rgba(0, 255, 255, 0.6);
-            z-index: 5; pointer-events: none;
-            box-shadow: 0 0 8px rgba(0, 255, 255, 0.8);
-        }
-        .horizontal-guide::after {
-            content: "前腕をこの線に合わせてください";
-            position: absolute; top: -30px; left: 50%; transform: translateX(-50%);
-            color: rgba(0, 255, 255, 0.9); font-size: 0.9rem; font-weight: bold;
-            text-shadow: 1px 1px 2px black; width: 100%;
-        }
-
         /* 結果パネル */
         .result-panel {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -81,7 +67,6 @@
         .result-table th, .result-table td { border: 1px solid #ddd; padding: 8px 4px; text-align: center; }
         .result-table th { background-color: #f2f2f2; color: #333; }
         
-        /* 母指の行も白背景にするため特別クラスは削除 */
         .restart-btn {
             margin: 30px auto; padding: 15px 40px; background: #6c757d; color: white;
             border: none; border-radius: 5px; font-size: 1rem; display: block;
@@ -113,8 +98,7 @@
     <div class="container">
         <video id="input_video" playsinline muted autoplay></video>
         <canvas id="output_canvas"></canvas>
-        <div class="horizontal-guide"></div>
-    </div>
+        </div>
 
     <div id="result_panel" class="result-panel">
         <div class="result-header">計測結果</div>
@@ -147,12 +131,12 @@
         };
     }
 
-    // ★音声読み上げ（完了を待てるようにPromise化）
+    // 音声読み上げ
     function speakAsync(text) {
         return new Promise((resolve) => {
             const uttr = new SpeechSynthesisUtterance(text);
             uttr.lang = "ja-JP";
-            uttr.onend = resolve; // 読み上げ終わったら完了
+            uttr.onend = resolve; 
             speechSynthesis.speak(uttr);
         });
     }
@@ -168,25 +152,24 @@
         }
     }
 
-    // ★計測シーケンス（アナウンス→計測）
+    // ★計測シーケンス
     async function startMeasurementSequence(type) {
         statusDisplay.style.display = 'block';
         currentDataRef = (type === 'active') ? activeData : passiveData;
         
-        // 1. アナウンス
         let introText = "";
         if (type === 'active') {
-            introText = "自動運動を計測します。前腕を横のラインに合わせてください。ひとりで握る、開くを繰り返してください。";
+            introText = "自動運動を計測します。前腕を横にしてください。ひとりで握る、開くを繰り返してください。";
         } else {
-            introText = "他動運動を計測します。前腕を横のラインに合わせてください。力を抜いてください。";
+            introText = "他動運動を計測します。前腕を横にしてください。力を抜いてください。";
         }
         
         statusDisplay.innerText = "アナウンス中...";
-        await speakAsync(introText); // 喋り終わるまで待つ
+        await speakAsync(introText);
         
         await speakAsync("それでは、計測を開始します。10秒間、4本の指を動かしてください。");
         
-        // 2. 4指計測スタート
+        // 4指計測スタート
         currentPhase = 'measuring_4fingers';
         let timeLeft = 10;
         
@@ -195,13 +178,13 @@
             timeLeft--;
             if (timeLeft < 0) {
                 clearInterval(timer);
-                startThumbSequence(type); // 次へ
+                startThumbSequence(type);
             }
         }, 1000);
     }
 
     async function startThumbSequence(type) {
-        currentPhase = 'idle'; // 一旦計測ストップ
+        currentPhase = 'idle';
         statusDisplay.innerText = "準備中...";
         
         await speakAsync("次に、前腕を回外してください。そして母指を5秒間動かしてください。");
@@ -265,19 +248,14 @@
         if (displayVal < j.ext) j.ext = displayVal;
     }
 
-    // ★ターゲットロックなし。単純に一番近い手を検出
     function onResults(results) {
         canvasElement.width = videoElement.videoWidth;
         canvasElement.height = videoElement.videoHeight;
         canvasCtx.save();
         canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
         
-        // ビデオは背景にあるので、ここでは描画しない（透明にする）か、
-        // 検出した線だけ描くスタイルにします。
-        // ※ v15では背景にvideoタグがいるので、canvasには骨格だけ描きます。
-        
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            // 画面中央に一番近い手を採用するロジック
+            // ターゲットロックなし、中央に近い手を優先
             const targetIdx = findCenterHandIndex(results.multiHandLandmarks);
             const lm = results.multiHandLandmarks[targetIdx];
 
@@ -307,7 +285,6 @@
         canvasCtx.restore();
     }
     
-    // 画面中央(0.5, 0.5)に近い手を優先
     function findCenterHandIndex(landmarksArray) {
         if (landmarksArray.length === 1) return 0;
         let minD = 999;
@@ -339,7 +316,7 @@
         const tA_tam = calcTamThumb(tA);
         const tP_tam = calcTamThumb(tP);
 
-        // 母指 (背景白の通常行)
+        // 母指 (白背景)
         html += generateRowThumb(tA, tP, tA_tam, tP_tam, 'CM');
         html += generateRowThumb(tA, tP, tA_tam, tP_tam, 'MP');
         html += generateRowThumb(tA, tP, tA_tam, tP_tam, 'IP');
@@ -368,7 +345,7 @@
     }
 
     function generateRowThumb(dA, dP, tamA, tamP, joint) {
-        let h = `<tr>`; // class="finger-row" を削除して白背景に
+        let h = `<tr>`; 
         if(joint==='CM') h += `<td rowspan="3">${dA.name}</td>`;
         h += `<td>${joint}</td>`;
         
@@ -403,7 +380,6 @@
         return h;
     }
 
-    // 初期化とカメラ起動
     const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
     hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     hands.onResults(onResults);
@@ -412,10 +388,8 @@
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
             videoElement.srcObject = stream;
-            // ページロード時にカメラを起動する
         } catch (e) { console.error(e); }
     }
-    // 起動時に即カメラアクセス（ユーザー操作前でも裏で準備）
     startCamera();
 
     let wakeLock = null;
