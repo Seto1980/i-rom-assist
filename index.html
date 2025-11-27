@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v26</title>
+    <title>AI手指可動域検査アシスト v27</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -39,10 +39,23 @@
         .result-table th { background-color: #f2f2f2; color: #333; }
         .restart-btn { margin: 30px auto; padding: 15px 40px; background: #6c757d; color: white; border: none; border-radius: 5px; font-size: 1rem; display: block; }
         
-        #loading_msg { position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 0.9rem; z-index: 500; text-shadow: 1px 1px 2px black; }
+        #loading_msg { 
+            position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%); 
+            color: #00d2ff; font-weight: bold; font-size: 1rem; z-index: 500; 
+            text-shadow: 1px 1px 2px black; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 10px;
+        }
+        
+        /* 強制リロードボタン（右上） */
+        .force-reload {
+            position: fixed; top: 10px; right: 10px; z-index: 20000;
+            background: #333; color: #aaa; border: 1px solid #555;
+            padding: 5px 10px; font-size: 0.7rem; border-radius: 5px; cursor: pointer;
+        }
     </style>
 </head>
 <body>
+
+    <button class="force-reload" onclick="location.reload()">↻ リロード</button>
 
     <div id="start_overlay" class="overlay">
         <div id="init_view">
@@ -73,7 +86,7 @@
     <button id="cancel_btn" class="cancel-btn" onclick="forceFinish()">■ 計測終了</button>
 
     <div class="container">
-        <video id="input_video" playsinline muted autoplay></video>
+        <video id="input_video" playsinline muted></video>
         <canvas id="output_canvas"></canvas>
     </div>
 
@@ -102,43 +115,71 @@
     let passiveData = createEmptyData();
     let currentDataRef = activeData; 
     let measurementTimer = null;
+    let isAiReady = false; // AI準備完了フラグ
 
+    // ★カメラ起動プロセス（v27修正版）
     async function initCamera() {
-        loadingMsg.innerText = "カメラへのアクセスを要求しています...";
+        loadingMsg.innerText = "カメラ権限を確認中...";
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: "environment",
+                    width: { ideal: 1280 }, // 解像度を指定して安定化を図る
+                    height: { ideal: 720 }
+                } 
+            });
             videoElement.srcObject = stream;
             
-            videoElement.onloadedmetadata = () => {
-                loadingMsg.innerText = "AIモデルを読み込んでいます...";
-                videoElement.play();
-                
+            // ビデオのメタデータ読み込み待ち
+            videoElement.onloadedmetadata = async () => {
+                loadingMsg.innerText = "映像開始中...";
+                try {
+                    await videoElement.play(); // ★ここで再生を確実に行う
+                } catch(e) {
+                    console.error("Play error:", e);
+                    loadingMsg.innerText = "再生エラー: 画面をタップしてください";
+                }
+
+                // 画面切り替え
                 initView.style.display = 'none';
                 modeView.style.display = 'flex';
+                loadingMsg.innerText = "AIモデル起動中... (初回は時間がかかります)";
                 
-                // ★修正: ループ処理をより堅牢に
-                const sendFrame = async () => {
-                    // ビデオが止まっていたら送らない
-                    if (videoElement.paused || videoElement.ended) {
-                        requestAnimationFrame(sendFrame);
-                        return;
-                    }
-                    try {
-                        await hands.send({image: videoElement});
-                        loadingMsg.style.display = 'none'; 
-                    } catch(err) {
-                        console.error("MediaPipe Error:", err);
-                    }
-                    requestAnimationFrame(sendFrame);
-                };
-                sendFrame();
+                // AIループ開始
+                startAiLoop();
             };
         } catch (e) {
             console.error(e);
-            alert("カメラの起動に失敗しました。\n権限を確認してリロードしてください。\n" + e.message);
-            loadingMsg.innerText = "エラー: カメラ権限がありません";
+            alert("カメラエラー: " + e.message);
+            loadingMsg.innerText = "エラー: 再読み込みしてください";
             loadingMsg.style.color = "red";
         }
+    }
+
+    // ★AIループ処理（独立関数化）
+    async function startAiLoop() {
+        const sendFrame = async () => {
+            if (videoElement.paused || videoElement.ended || !videoElement.videoWidth) {
+                // 映像が来てない時はスキップして次へ
+                requestAnimationFrame(sendFrame);
+                return;
+            }
+            
+            try {
+                await hands.send({image: videoElement});
+                
+                if (!isAiReady) {
+                    isAiReady = true;
+                    loadingMsg.style.display = 'none'; // 準備完了で消す
+                    console.log("AI Ready!");
+                }
+            } catch(err) {
+                console.error("MediaPipe Error:", err);
+                // エラーが出てもループは止めない
+            }
+            requestAnimationFrame(sendFrame);
+        };
+        sendFrame();
     }
 
     function createEmptyData() {
@@ -166,6 +207,10 @@
     }
 
     function selectMode(mode) {
+        if (!isAiReady) {
+            alert("AIの準備中です。少々お待ちください...");
+            return;
+        }
         selectedMode = mode;
         startOverlay.style.display = 'none';
         cancelBtn.style.display = 'block';
@@ -176,16 +221,10 @@
         }
     }
 
-    // ★修正: 強制終了時は、音声を待たずに即リザルトへ
     function forceFinish() {
-        currentPhase = 'finished'; // ループを止めるフラグ
         if (measurementTimer) clearInterval(measurementTimer);
-        speechSynthesis.cancel(); // 喋っているのを黙らせる
-        
-        // 即画面切り替え
-        statusDisplay.style.display = 'none';
-        cancelBtn.style.display = 'none';
-        showResults();
+        speechSynthesis.cancel();
+        finishAll();
     }
 
     async function startMeasurementSequence(type) {
@@ -214,7 +253,6 @@
         currentPhase = 'idle';
         statusDisplay.innerText = "準備中...";
         
-        // ★修正: 読み方指定「しょうしがわ」
         await speakAsync("つぎに、しょうしがわから計測をします。しょうしがわからカメラを向けてください。");
         if(currentPhase === 'finished') return;
 
@@ -264,7 +302,7 @@
     }
 
     function finishAll() {
-        if (currentPhase === 'finished') return; // 既にforceFinishで呼ばれていたら何もしない
+        if (currentPhase === 'finished') return;
         currentPhase = 'finished';
         cancelBtn.style.display = 'none';
         statusDisplay.style.display = 'none';
@@ -363,9 +401,8 @@
     hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     hands.onResults(onResults);
 
-    // ★ユーザーアクションでのみ起動させる
-    // (自動起動startCamera()の呼び出しは削除済み)
-
+    // initCameraはボタンから呼ばれる
+    
     let wakeLock = null;
     async function requestWakeLock() { try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {} }
     requestWakeLock();
