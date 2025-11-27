@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v25</title>
+    <title>AI手指可動域検査アシスト v26</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -16,9 +16,8 @@
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; }
         
         .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 9999; color: white; backdrop-filter: blur(5px); }
-        .mode-select-container { display: none; /* 最初は隠す */ flex-direction: column; gap: 20px; width: 85%; max-width: 320px; }
+        .mode-select-container { display: none; flex-direction: column; gap: 20px; width: 85%; max-width: 320px; }
         
-        /* カメラ起動ボタン */
         #camera_start_btn {
             padding: 20px 40px; font-size: 1.3rem; font-weight: bold;
             background-color: #28a745; color: white; border: none; border-radius: 50px;
@@ -104,7 +103,6 @@
     let currentDataRef = activeData; 
     let measurementTimer = null;
 
-    // ★カメラ初期化（ユーザー操作トリガー）
     async function initCamera() {
         loadingMsg.innerText = "カメラへのアクセスを要求しています...";
         try {
@@ -115,16 +113,21 @@
                 loadingMsg.innerText = "AIモデルを読み込んでいます...";
                 videoElement.play();
                 
-                // カメラ成功したらモード選択へ
                 initView.style.display = 'none';
                 modeView.style.display = 'flex';
                 
+                // ★修正: ループ処理をより堅牢に
                 const sendFrame = async () => {
+                    // ビデオが止まっていたら送らない
+                    if (videoElement.paused || videoElement.ended) {
+                        requestAnimationFrame(sendFrame);
+                        return;
+                    }
                     try {
                         await hands.send({image: videoElement});
-                        loadingMsg.style.display = 'none'; // 成功したら消す
+                        loadingMsg.style.display = 'none'; 
                     } catch(err) {
-                        console.error(err);
+                        console.error("MediaPipe Error:", err);
                     }
                     requestAnimationFrame(sendFrame);
                 };
@@ -132,7 +135,7 @@
             };
         } catch (e) {
             console.error(e);
-            alert("カメラの起動に失敗しました。\nブラウザの設定でカメラ権限を「許可」にしてリロードしてください。\n\nエラー: " + e.message);
+            alert("カメラの起動に失敗しました。\n権限を確認してリロードしてください。\n" + e.message);
             loadingMsg.innerText = "エラー: カメラ権限がありません";
             loadingMsg.style.color = "red";
         }
@@ -173,10 +176,16 @@
         }
     }
 
+    // ★修正: 強制終了時は、音声を待たずに即リザルトへ
     function forceFinish() {
+        currentPhase = 'finished'; // ループを止めるフラグ
         if (measurementTimer) clearInterval(measurementTimer);
-        speechSynthesis.cancel();
-        finishAll();
+        speechSynthesis.cancel(); // 喋っているのを黙らせる
+        
+        // 即画面切り替え
+        statusDisplay.style.display = 'none';
+        cancelBtn.style.display = 'none';
+        showResults();
     }
 
     async function startMeasurementSequence(type) {
@@ -186,9 +195,9 @@
         
         let introText = "";
         if (type === 'active') {
-            introText = "自動運動を計測します。まずは前腕を横にしてください。しっかり握る、しっかり伸ばすを繰り返してください。示指側から撮影した後に、小指側の撮影をします。最後に母指を撮影します。";
+            introText = "自動運動を計測します。まずは前腕を横にしてください。しっかり握る、しっかり伸ばすを繰り返してください。示指側から撮影した後に、しょうしがわの撮影をします。最後に母指を撮影します。";
         } else {
-            introText = "他動運動を計測します。まずは前腕を横にしてください。力を抜いてください。示指側から撮影した後に、小指側の撮影をします。最後に母指を撮影します。";
+            introText = "他動運動を計測します。まずは前腕を横にしてください。力を抜いてください。示指側から撮影した後に、しょうしがわの撮影をします。最後に母指を撮影します。";
         }
         
         statusDisplay.innerText = "アナウンス中...";
@@ -205,7 +214,8 @@
         currentPhase = 'idle';
         statusDisplay.innerText = "準備中...";
         
-        await speakAsync("次に小指側から計測をします。小指側からカメラを向けてください。");
+        // ★修正: 読み方指定「しょうしがわ」
+        await speakAsync("つぎに、しょうしがわから計測をします。しょうしがわからカメラを向けてください。");
         if(currentPhase === 'finished') return;
 
         await speakAsync("10秒間、4本の指を動かしてください。");
@@ -218,7 +228,7 @@
         currentPhase = 'idle';
         statusDisplay.innerText = "準備中...";
         
-        await speakAsync("次に、前腕を回外してください。そして母指を5秒間動かしてください。");
+        await speakAsync("次に、前腕をかいがいしてください。そして母指を5秒間動かしてください。");
         if(currentPhase === 'finished') return;
         
         currentPhase = 'measuring_thumb';
@@ -254,22 +264,23 @@
     }
 
     function finishAll() {
+        if (currentPhase === 'finished') return; // 既にforceFinishで呼ばれていたら何もしない
         currentPhase = 'finished';
         cancelBtn.style.display = 'none';
         statusDisplay.style.display = 'none';
+        
         const uttr = new SpeechSynthesisUtterance("計測を終了します。");
         uttr.lang = "ja-JP";
         speechSynthesis.speak(uttr);
+        
         showResults();
     }
 
     function calculateAngle(a, b, c) {
         const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
         let angle = radians * 180.0 / Math.PI;
-        
         if (angle > 180.0) angle -= 360.0;
         if (angle < -180.0) angle += 360.0;
-        
         let result = 180 - Math.abs(angle); 
         if (result > -2 && result < 2) return 0;
         return result; 
@@ -352,8 +363,9 @@
     hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     hands.onResults(onResults);
 
-    // ★自動起動は削除し、ボタンクリックでinitCamera()を呼ぶ形式に変更
-    
+    // ★ユーザーアクションでのみ起動させる
+    // (自動起動startCamera()の呼び出しは削除済み)
+
     let wakeLock = null;
     async function requestWakeLock() { try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {} }
     requestWakeLock();
