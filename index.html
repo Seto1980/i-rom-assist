@@ -3,17 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v31</title>
+    <title>AI手指可動域検査アシスト v32</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 
     <style>
+        /* ★重要: レイアウト崩れを防ぐ設定 */
+        * { box-sizing: border-box; }
+
         body { font-family: sans-serif; text-align: center; background-color: black; margin: 0; padding: 0; color: white; overflow: hidden; }
-        .container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        
+        .container { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            display: flex; justify-content: center; align-items: center; /* 映像を中央に */
+            z-index: 1;
+        }
+        
+        /* ★修正: object-fitをcontainにして、座標ズレを防ぐ */
+        video { 
+            position: absolute; width: 100%; height: 100%; 
+            object-fit: contain; /* 画面比率を維持（黒帯は出るがズレない） */
+        }
+        canvas { 
+            position: absolute; width: 100%; height: 100%; 
+            object-fit: contain; 
+        }
         
         .overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -38,7 +54,7 @@
         .mode-btn small { display: block; font-size: 0.8rem; color: #ccc; margin-top: 5px; }
 
         .status-display {
-            position: fixed; top: 10%; left: 50%; transform: translateX(-50%);
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
             background: rgba(0, 0, 0, 0.8); padding: 10px 20px; border-radius: 30px;
             color: #00ff00; font-size: 1.2rem; font-weight: bold;
             z-index: 5000; display: none; white-space: nowrap; width: 90%; max-width: 400px; text-align: center;
@@ -54,16 +70,31 @@
         }
         .cancel-btn:active { transform: translateX(-50%) scale(0.95); }
 
+        /* ★修正: 結果画面の表示位置修正 */
         .result-panel {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: white; z-index: 10000; overflow-y: auto;
             display: none; padding: 10px; color: #333;
+            text-align: center; /* 子要素を中央揃え */
         }
-        .result-header { background: #007bff; color: white; padding: 10px; font-size: 1.1rem; font-weight: bold; border-radius: 5px; margin-bottom: 5px; }
-        .result-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; margin-bottom: 10px; }
-        .result-table th, .result-table td { border: 1px solid #ccc; padding: 3px 1px; text-align: center; height: 25px; }
+        .result-header { 
+            background: #007bff; color: white; padding: 10px; 
+            font-size: 1.1rem; font-weight: bold; border-radius: 5px; margin-bottom: 10px;
+        }
+        .result-table { 
+            width: 100%; max-width: 600px; /* PCなどで広がりすぎないように */
+            border-collapse: collapse; font-size: 0.75rem; 
+            margin: 0 auto 10px auto; /* 中央揃え */
+        }
+        .result-table th, .result-table td { 
+            border: 1px solid #ccc; padding: 3px 1px; text-align: center; height: 28px;
+        }
         .result-table th { background-color: #f2f2f2; color: #333; font-weight: bold; }
-        .restart-btn { width: 100%; padding: 12px; background: #6c757d; color: white; border: none; border-radius: 5px; font-size: 1rem; display: block; }
+        .restart-btn { 
+            width: 100%; max-width: 300px; margin: 0 auto;
+            padding: 12px; background: #6c757d; color: white; 
+            border: none; border-radius: 5px; font-size: 1rem; display: block; 
+        }
         
         #loading_msg { margin-top: 20px; color: #00d2ff; }
     </style>
@@ -72,7 +103,7 @@
 
     <div id="start_overlay" class="overlay">
         <div id="init_view">
-            <h2 style="margin-bottom:30px;">AI手指可動域検査 v31</h2>
+            <h2 style="margin-bottom:30px;">AI手指可動域検査 v32</h2>
             <button id="camera_start_btn" onclick="initCamera()">📷 カメラを起動</button>
             <div id="loading_msg"></div>
         </div>
@@ -146,12 +177,7 @@
     }
 
     const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-    hands.setOptions({ 
-        maxNumHands: 1, 
-        modelComplexity: 1, 
-        minDetectionConfidence: 0.5, 
-        minTrackingConfidence: 0.7 // ★追従精度を上げる（自信がない予測は捨てる）
-    });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     hands.onResults(onResults);
 
     async function processVideo() {
@@ -283,10 +309,13 @@
         currentPhase = 'finished';
         cancelBtn.style.display = 'none';
         statusDisplay.style.display = 'none';
+        
         resultPanel.style.display = 'block'; 
+        
         const uttr = new SpeechSynthesisUtterance("計測を終了します。");
         uttr.lang = "ja-JP";
         speechSynthesis.speak(uttr);
+        
         showResults();
     }
 
@@ -300,15 +329,9 @@
         return result; 
     }
 
-    // ★重要: フィルタ係数の修正
-    // alphaが大きいほど、新しい値を重視する（0.8 = 80%新しい値を使う = 反応が速い）
     function applyFilter(currentVal, newVal, jointType) {
-        let alpha = 0.8; // 基本はかなり敏感にする
-        if (jointType === 'dip' || jointType === 'ip') {
-            alpha = 0.5; // 指先だけ少し安定させる（それでも以前の0.15より大幅に速い）
-        }
-        
-        // 初回はそのまま
+        let alpha = 0.8; 
+        if (jointType === 'dip' || jointType === 'ip') alpha = 0.5;
         if (currentVal === 0 && newVal > 0) return newVal;
         return currentVal * (1 - alpha) + newVal * alpha;
     }
@@ -332,7 +355,6 @@
             const targetIdx = findCenterHandIndex(results.multiHandLandmarks);
             const lm = results.multiHandLandmarks[targetIdx];
 
-            // 描画を太く・大きく
             drawConnectors(canvasCtx, lm, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
             drawLandmarks(canvasCtx, lm, {color: '#FF0000', lineWidth: 2, radius: 4});
 
@@ -373,17 +395,27 @@
         return idx;
     }
 
+    // ★重要: 初期値999を考慮したTAM計算
     function calcTamThumb(data) {
-        const mp_deficit = Math.max(0, data.joints.mp.ext);
-        const ip_deficit = Math.max(0, data.joints.ip.ext);
+        const mp_ext = (data.joints.mp.ext > 900) ? 0 : data.joints.mp.ext;
+        const ip_ext = (data.joints.ip.ext > 900) ? 0 : data.joints.ip.ext;
+        const mp_deficit = Math.max(0, mp_ext);
+        const ip_deficit = Math.max(0, ip_ext);
         return Math.max(0, data.joints.mp.flex - mp_deficit) + Math.max(0, data.joints.ip.flex - ip_deficit);
     }
 
     function calcTamFinger(data) {
-        const mp_deficit = Math.max(0, data.joints.mp.ext);
-        const pip_deficit = Math.max(0, data.joints.pip.ext);
-        const dip_deficit = Math.max(0, data.joints.dip.ext);
-        return Math.max(0, data.joints.mp.flex - mp_deficit) + Math.max(0, data.joints.pip.flex - pip_deficit) + Math.max(0, data.joints.dip.flex - dip_deficit);
+        const mp_ext = (data.joints.mp.ext > 900) ? 0 : data.joints.mp.ext;
+        const pip_ext = (data.joints.pip.ext > 900) ? 0 : data.joints.pip.ext;
+        const dip_ext = (data.joints.dip.ext > 900) ? 0 : data.joints.dip.ext;
+        
+        const mp_deficit = Math.max(0, mp_ext);
+        const pip_deficit = Math.max(0, pip_ext);
+        const dip_deficit = Math.max(0, dip_ext);
+        
+        return Math.max(0, data.joints.mp.flex - mp_deficit) + 
+               Math.max(0, data.joints.pip.flex - pip_deficit) + 
+               Math.max(0, data.joints.dip.flex - dip_deficit);
     }
 
     function formatExt(val) {
@@ -391,6 +423,42 @@
         if (val > 0) return `-${val}°`; 
         if (val === 0) return `0°`;
         return `+${Math.abs(val)}°`; 
+    }
+
+    function showResults() {
+        let html = "";
+        html += `<table class="result-table"><thead><tr><th rowspan="2">指</th><th rowspan="2">関節</th>`;
+        if (selectedMode === 'both') {
+            html += `<th colspan="2">自動 (TAM)</th><th colspan="2">他動 (TPM)</th></tr><tr><th>屈/伸</th><th>計</th><th>屈/伸</th><th>計</th></tr>`;
+        } else if (selectedMode === 'active') {
+            html += `<th colspan="2">自動 (Active)</th></tr><tr><th>屈/伸</th><th>TAM</th></tr>`;
+        } else {
+            html += `<th colspan="2">他動 (Passive)</th></tr><tr><th>屈/伸</th><th>TPM</th></tr>`;
+        }
+        html += `</thead><tbody>`;
+
+        const tA = activeData.thumb;
+        const tP = passiveData.thumb;
+        const tA_tam = calcTamThumb(tA);
+        const tP_tam = calcTamThumb(tP);
+
+        html += generateRowThumb(tA, tP, tA_tam, tP_tam, 'CM');
+        html += generateRowThumb(tA, tP, tA_tam, tP_tam, 'MP');
+        html += generateRowThumb(tA, tP, tA_tam, tP_tam, 'IP');
+
+        ['index', 'middle', 'ring', 'pinky'].forEach(key => {
+            const fA = activeData[key];
+            const fP = passiveData[key];
+            const fA_tam = calcTamFinger(fA);
+            const fP_tam = calcTamFinger(fP);
+            
+            html += generateRowFinger(fA, fP, fA_tam, fP_tam, 'MP');
+            html += generateRowFinger(fA, fP, fA_tam, fP_tam, 'PIP');
+            html += generateRowFinger(fA, fP, fA_tam, fP_tam, 'DIP');
+        });
+
+        html += `</tbody></table>`;
+        resultContainer.innerHTML = html;
     }
 
     function generateRowThumb(dA, dP, tamA, tamP, joint) {
