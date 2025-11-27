@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v20</title>
+    <title>AI手指可動域検査アシスト v21</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -140,6 +140,7 @@
         };
     }
 
+    // 読み上げ処理
     function speakAsync(text) {
         return new Promise((resolve) => {
             if(currentPhase === 'finished') return;
@@ -147,7 +148,8 @@
             const uttr = new SpeechSynthesisUtterance(text);
             uttr.lang = "ja-JP";
             
-            const timeoutMs = (text.length * 250) + 1500; // 少し余裕を持たせる
+            // 安全策：文字数に応じたタイムアウト設定
+            const timeoutMs = (text.length * 250) + 1500; 
             const safeTimer = setTimeout(() => { resolve(); }, timeoutMs);
 
             uttr.onend = () => { clearTimeout(safeTimer); resolve(); };
@@ -174,53 +176,56 @@
         finishAll();
     }
 
-    // ★計測シーケンス（3段階）
+    // ★計測シーケンス（読み上げ文言修正）
     async function startMeasurementSequence(type) {
         if(currentPhase === 'finished') return;
 
         statusDisplay.style.display = 'block';
         currentDataRef = (type === 'active') ? activeData : passiveData;
         
-        // --- 1. 示指・中指 (Radial) ---
         let introText = "";
-        // ★ひらがな化で発音改善
         if (type === 'active') {
-            introText = "じどううんどうをけいそくします。ぜんわんを、よこにしてください。ひとりで、にぎる、ひらくを、くりかえしてください。";
+            // ★「ぼし」だけひらがな
+            introText = "自動運動を計測します。まずは前腕を横にしてください。しっかり握る、しっかり伸ばすを繰り返してください。示指側から撮影した後に、小指側の撮影をします。最後にぼしを撮影します。";
         } else {
-            introText = "たどううんどうをけいそくします。ぜんわんを、よこにしてください。ちからを、ぬいてください。";
+            introText = "他動運動を計測します。まずは前腕を横にしてください。力を抜いてください。示指側から撮影した後に、小指側の撮影をします。最後にぼしを撮影します。";
         }
         
         statusDisplay.innerText = "アナウンス中...";
         await speakAsync(introText);
         if(currentPhase === 'finished') return;
         
-        await speakAsync("それでは、けいそくをかいしします。じゅうびょうかん、よんほんのゆびを、うごかしてください。");
+        await speakAsync("それでは、示指側から計測を開始します。10秒間、4本の指を動かしてください。");
         if(currentPhase === 'finished') return;
 
-        currentPhase = 'measuring_radial'; // 示指・中指のみ計測
+        // --- 1. 示指・中指 (Radial) ---
+        currentPhase = 'measuring_radial';
         await runTimer(type, "示指・中指", 10);
         
         // --- 2. 環指・小指 (Ulnar) ---
         if(currentPhase === 'finished') return;
-        currentPhase = 'idle';
+        currentPhase = 'idle'; // 計測停止
         statusDisplay.innerText = "準備中...";
-        await speakAsync("つぎに、しょうしがわからけいそくします。てくびをかえして、しょうしがわを、かめらにむけてください。");
         
+        await speakAsync("つぎに小指側から計測をします。小指側からカメラを向けてください。");
         if(currentPhase === 'finished') return;
-        await speakAsync("じゅうびょうかん、よんほんのゆびを、うごかしてください。");
+
+        await speakAsync("10秒間、4本の指を動かしてください。");
+        if(currentPhase === 'finished') return;
         
-        if(currentPhase === 'finished') return;
-        currentPhase = 'measuring_ulnar'; // 環指・小指のみ計測
+        currentPhase = 'measuring_ulnar';
         await runTimer(type, "環指・小指", 10);
 
         // --- 3. 母指 (Thumb) ---
         if(currentPhase === 'finished') return;
-        currentPhase = 'idle';
+        currentPhase = 'idle'; // 計測停止
         statusDisplay.innerText = "準備中...";
-        await speakAsync("つぎに、ぜんわんを、かいがいしてください。そして、ぼしを、ごびょうかん、うごかしてください。");
         
+        // ★「かいがい」「ぼし」をひらがな
+        await speakAsync("次に、前腕をかいがいしてください。そして、ぼしを5秒間動かしてください。");
         if(currentPhase === 'finished') return;
-        currentPhase = 'measuring_thumb'; // 母指のみ計測
+        
+        currentPhase = 'measuring_thumb';
         await runTimer(type, "母指", 5);
 
         // --- 終了または次のモードへ ---
@@ -228,7 +233,7 @@
         currentPhase = 'idle';
         
         if (selectedMode === 'both' && type === 'active') {
-            speakAsync("じどううんどうがしゅうりょうしました。つづいて、たどううんどうに、うつります。").then(() => {
+            speakAsync("自動運動が終了しました。続いて他動運動に移ります。").then(() => {
                 if(currentPhase !== 'finished') {
                     setTimeout(() => { startMeasurementSequence('passive'); }, 1000);
                 }
@@ -258,7 +263,7 @@
         currentPhase = 'finished';
         cancelBtn.style.display = 'none';
         statusDisplay.style.display = 'none';
-        const uttr = new SpeechSynthesisUtterance("けいそくを、しゅうりょうします。");
+        const uttr = new SpeechSynthesisUtterance("計測を終了します。");
         uttr.lang = "ja-JP";
         speechSynthesis.speak(uttr);
         showResults();
@@ -421,6 +426,7 @@
         return h;
     }
 
+    // MediaPipe起動
     const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
     hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     hands.onResults(onResults);
