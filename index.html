@@ -3,54 +3,110 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v28</title>
+    <title>AI手指可動域検査アシスト v29</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 
     <style>
-        body { font-family: sans-serif; text-align: center; background-color: black; margin: 0; padding: 0; color: white; }
-        .container { position: relative; width: 100%; height: 100vh; overflow: hidden; }
-        video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: block; }
-        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; }
+        body { font-family: sans-serif; text-align: center; background-color: black; margin: 0; padding: 0; color: white; overflow: hidden; }
         
-        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 9999; }
+        /* コンテナ：ビデオとキャンバスを重ねる */
+        .container { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            z-index: 1;
+        }
+        video { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            object-fit: cover; transform: scaleX(-1); /* 自撮り用反転を防ぐため、必要ならJSで制御するが今回は外カメラなので反転しない */
+        }
+        /* 外カメラは反転させない */
+        video.environment { transform: scaleX(1); }
+
+        canvas { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            object-fit: cover;
+        }
         
+        /* オーバーレイ（スタート画面・モード選択） */
+        .overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.8); 
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 9999; /* 最前面 */
+            backdrop-filter: blur(5px);
+        }
+        
+        #init_view, #mode_view { display: flex; flex-direction: column; align-items: center; gap: 20px; width: 100%; }
+        #mode_view { display: none; }
+
+        /* ボタン類 */
         #camera_start_btn {
             padding: 20px 50px; font-size: 1.5rem; font-weight: bold;
             background-color: #28a745; color: white; border: none; border-radius: 50px;
             cursor: pointer; box-shadow: 0 4px 15px rgba(40, 167, 69, 0.6);
         }
+        .mode-btn {
+            width: 80%; max-width: 300px; padding: 18px; font-size: 1.1rem; font-weight: bold;
+            background-color: rgba(50, 50, 50, 0.8); color: white; 
+            border: 2px solid #00d2ff; border-radius: 12px; cursor: pointer;
+        }
+        .mode-btn small { display: block; font-size: 0.8rem; color: #ccc; margin-top: 5px; }
 
-        .mode-select-container { display: none; flex-direction: column; gap: 20px; width: 85%; max-width: 320px; }
-        .mode-btn { padding: 18px; font-size: 1.1rem; font-weight: bold; background-color: rgba(0, 0, 0, 0.6); color: white; border: 2px solid #00d2ff; border-radius: 12px; cursor: pointer; }
-        
-        .status-display { position: fixed; top: 10%; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.8); padding: 12px 24px; border-radius: 30px; color: #00ff00; font-size: 1.2rem; font-weight: bold; z-index: 100; display: none; }
-        
-        .cancel-btn { position: fixed; top: 20px; right: 20px; background: rgba(220, 53, 69, 0.9); color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; z-index: 200; display: none; }
+        /* ステータス表示 */
+        .status-display {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8); padding: 10px 20px; border-radius: 30px;
+            color: #00ff00; font-size: 1.2rem; font-weight: bold;
+            z-index: 5000; display: none; white-space: nowrap;
+        }
 
-        .result-panel { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 10000; overflow-y: auto; display: none; padding-bottom: 50px; color: #333; }
-        .result-header { background: #007bff; color: white; padding: 15px; font-size: 1.2rem; font-weight: bold; }
-        .result-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.8rem; }
+        /* キャンセルボタン */
+        .cancel-btn {
+            position: fixed; top: 20px; right: 20px;
+            background: rgba(220, 53, 69, 0.9); color: white; border: none; padding: 10px 20px;
+            border-radius: 20px; font-weight: bold; z-index: 5001; cursor: pointer; display: none;
+        }
+
+        /* 結果画面 */
+        .result-panel {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: white; z-index: 10000; overflow-y: auto;
+            display: none; padding-bottom: 50px; color: #333;
+        }
+        .result-header { background: #007bff; color: white; padding: 20px; font-size: 1.3rem; font-weight: bold; }
+        .result-table { width: 95%; border-collapse: collapse; margin: 20px auto; font-size: 0.9rem; }
         .result-table th, .result-table td { border: 1px solid #ddd; padding: 8px 4px; text-align: center; }
         .result-table th { background-color: #f2f2f2; color: #333; }
-        .restart-btn { margin: 30px auto; padding: 15px 40px; background: #6c757d; color: white; border: none; border-radius: 5px; font-size: 1rem; display: block; }
+        .restart-btn {
+            margin: 30px auto; padding: 15px 50px; background: #6c757d; color: white;
+            border: none; border-radius: 5px; font-size: 1.2rem; display: block;
+        }
+        
+        #loading_msg { margin-top: 20px; color: #00d2ff; }
     </style>
 </head>
 <body>
 
     <div id="start_overlay" class="overlay">
         <div id="init_view">
-            <h2 style="margin-bottom:30px;">AI手指可動域検査</h2>
-            <button id="camera_start_btn" onclick="startSimpleCamera()">📷 カメラ起動</button>
+            <h2 style="margin-bottom:30px;">AI手指可動域検査 v29</h2>
+            <button id="camera_start_btn" onclick="initCamera()">📷 カメラを起動</button>
+            <div id="loading_msg"></div>
         </div>
 
-        <div id="mode_view" class="mode-select-container">
+        <div id="mode_view">
             <h2 style="margin-bottom:20px;">測定モード選択</h2>
-            <button class="mode-btn" onclick="selectMode('active')">自動運動のみ</button>
-            <button class="mode-btn" onclick="selectMode('passive')">他動運動のみ</button>
-            <button class="mode-btn" onclick="selectMode('both')">自動 ＆ 他動</button>
+            <button class="mode-btn" onclick="selectMode('active')">
+                自動運動のみ<small>Active Motion (TAM)</small>
+            </button>
+            <button class="mode-btn" onclick="selectMode('passive')">
+                他動運動のみ<small>Passive Motion (TPM)</small>
+            </button>
+            <button class="mode-btn" onclick="selectMode('both')">
+                自動 ＆ 他動<small>Active & Passive</small>
+            </button>
         </div>
     </div>
 
@@ -58,7 +114,7 @@
     <button id="cancel_btn" class="cancel-btn" onclick="forceFinish()">■ 計測終了</button>
 
     <div class="container">
-        <video id="input_video" playsinline muted autoplay></video>
+        <video id="input_video" class="environment" playsinline muted autoplay></video>
         <canvas id="output_canvas"></canvas>
     </div>
 
@@ -79,6 +135,7 @@
     const cancelBtn = document.getElementById('cancel_btn');
     const resultPanel = document.getElementById('result_panel');
     const resultContainer = document.getElementById('result_container');
+    const loadingMsg = document.getElementById('loading_msg');
 
     let selectedMode = ''; 
     let currentPhase = 'idle';
@@ -87,32 +144,60 @@
     let currentDataRef = activeData; 
     let measurementTimer = null;
 
-    // ★一番シンプルで強力なカメラ起動コード
-    async function startSimpleCamera() {
+    // ★カメラ起動処理（手動getUserMedia）
+    async function initCamera() {
+        loadingMsg.innerText = "カメラを起動中...";
         try {
+            // ここで明確に「environment（背面）」を指定
             const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: "environment", width: 1280, height: 720 } 
+                video: { 
+                    facingMode: "environment", 
+                    width: { ideal: 1280 }, 
+                    height: { ideal: 720 } 
+                } 
             });
             videoElement.srcObject = stream;
-            videoElement.play();
-
-            // 画面切り替え
-            initView.style.display = 'none';
-            modeView.style.display = 'flex';
-
-            // AIループ開始（余計なチェックをせず回し続ける）
-            const camera = new Camera(videoElement, {
-                onFrame: async () => {
-                    await hands.send({image: videoElement});
-                },
-                width: 1280,
-                height: 720
-            });
-            camera.start();
-
+            
+            videoElement.onloadedmetadata = () => {
+                videoElement.play();
+                loadingMsg.innerText = "AIモデル読み込み中... (お待ちください)";
+                
+                // AIループ開始
+                processVideo();
+                
+                // 画面切り替え
+                initView.style.display = 'none';
+                modeView.style.display = 'flex';
+            };
         } catch (e) {
-            alert("カメラエラー: " + e.message);
+            console.error(e);
+            alert("カメラ起動エラー: " + e.message);
+            loadingMsg.innerText = "エラー: 再読み込みしてください";
         }
+    }
+
+    // ★MediaPipe初期化
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({ 
+        maxNumHands: 1, 
+        modelComplexity: 1, 
+        minDetectionConfidence: 0.5, 
+        minTrackingConfidence: 0.5 
+    });
+    hands.onResults(onResults);
+
+    // ★手動ループ処理（一番確実な方法）
+    async function processVideo() {
+        if (videoElement.paused || videoElement.ended) {
+            requestAnimationFrame(processVideo);
+            return;
+        }
+        try {
+            await hands.send({image: videoElement});
+        } catch(e) {
+            console.error("AI Error:", e);
+        }
+        requestAnimationFrame(processVideo);
     }
 
     function createEmptyData() {
@@ -131,7 +216,8 @@
             speechSynthesis.cancel();
             const uttr = new SpeechSynthesisUtterance(text);
             uttr.lang = "ja-JP";
-            const safeTimer = setTimeout(() => { resolve(); }, (text.length * 200) + 1500);
+            const timeoutMs = (text.length * 250) + 1500; 
+            const safeTimer = setTimeout(() => { resolve(); }, timeoutMs);
             uttr.onend = () => { clearTimeout(safeTimer); resolve(); };
             uttr.onerror = () => { clearTimeout(safeTimer); resolve(); };
             speechSynthesis.speak(uttr);
@@ -140,8 +226,8 @@
 
     function selectMode(mode) {
         selectedMode = mode;
-        startOverlay.style.display = 'none';
-        cancelBtn.style.display = 'block';
+        startOverlay.style.display = 'none'; // オーバーレイを消す
+        cancelBtn.style.display = 'block';   // キャンセルボタン表示
         if (mode === 'both') {
             startMeasurementSequence('active'); 
         } else {
@@ -161,7 +247,7 @@
         currentDataRef = (type === 'active') ? activeData : passiveData;
         
         let introText = (type === 'active') 
-            ? "自動運動を計測します。まずは前腕を横にしてください。しっかり握る、しっかり伸ばすを繰り返してください。示指側から撮影した後に、しょうしがわの撮影をします。最後に母指を撮影します。"
+            ? "自動運動を計測します。まずは前腕を横にしてください。しっかり握る、しっかり伸ばすを繰り返してください。示指側から撮影した後に、しょうしがわの撮影をします。最後に母指を撮影します。" 
             : "他動運動を計測します。まずは前腕を横にしてください。力を抜いてください。示指側から撮影した後に、しょうしがわの撮影をします。最後に母指を撮影します。";
         
         statusDisplay.innerText = "アナウンス中...";
@@ -230,9 +316,14 @@
         currentPhase = 'finished';
         cancelBtn.style.display = 'none';
         statusDisplay.style.display = 'none';
+        
+        // ★重要: 結果パネルを強制的に最前面へ
+        resultPanel.style.display = 'block';
+        
         const uttr = new SpeechSynthesisUtterance("計測を終了します。");
         uttr.lang = "ja-JP";
         speechSynthesis.speak(uttr);
+        
         showResults();
     }
 
@@ -260,6 +351,92 @@
         if (displayVal <= 4 && displayVal >= -4) displayVal = 0;
         if (displayVal > j.flex) j.flex = displayVal;
         if (displayVal < j.ext) j.ext = displayVal;
+    }
+
+    function onResults(results) {
+        canvasElement.width = videoElement.videoWidth;
+        canvasElement.height = videoElement.videoHeight;
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        
+        if (currentPhase !== 'finished' && results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const targetIdx = findCenterHandIndex(results.multiHandLandmarks);
+            const lm = results.multiHandLandmarks[targetIdx];
+
+            drawConnectors(canvasCtx, lm, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+            drawLandmarks(canvasCtx, lm, {color: '#FF0000', lineWidth: 1});
+
+            if (currentPhase === 'measuring_radial') {
+                updateJointData('index', 'mp',  calculateAngle(lm[0], lm[5], lm[6]));
+                updateJointData('index', 'pip', calculateAngle(lm[5], lm[6], lm[7]));
+                updateJointData('index', 'dip', calculateAngle(lm[6], lm[7], lm[8]));
+                updateJointData('middle', 'mp',  calculateAngle(lm[0], lm[9], lm[10]));
+                updateJointData('middle', 'pip', calculateAngle(lm[9], lm[10], lm[11]));
+                updateJointData('middle', 'dip', calculateAngle(lm[10], lm[11], lm[12]));
+            }
+            if (currentPhase === 'measuring_ulnar') {
+                updateJointData('ring', 'mp',  calculateAngle(lm[0], lm[13], lm[14]));
+                updateJointData('ring', 'pip', calculateAngle(lm[13], lm[14], lm[15]));
+                updateJointData('ring', 'dip', calculateAngle(lm[14], lm[15], lm[16]));
+                updateJointData('pinky', 'mp',  calculateAngle(lm[0], lm[17], lm[18]));
+                updateJointData('pinky', 'pip', calculateAngle(lm[17], lm[18], lm[19]));
+                updateJointData('pinky', 'dip', calculateAngle(lm[18], lm[19], lm[20]));
+            }
+            if (currentPhase === 'measuring_thumb') {
+                updateJointData('thumb', 'cm', calculateAngle(lm[0], lm[1], lm[2])); 
+                updateJointData('thumb', 'mp', calculateAngle(lm[1], lm[2], lm[3]));
+                updateJointData('thumb', 'ip', calculateAngle(lm[2], lm[3], lm[4]));
+            }
+        }
+        canvasCtx.restore();
+    }
+    
+    function findCenterHandIndex(landmarksArray) {
+        if (landmarksArray.length === 1) return 0;
+        let minD = 999;
+        let idx = 0;
+        for(let i=0; i<landmarksArray.length; i++){
+            const wrist = landmarksArray[i][0];
+            const d = Math.sqrt((wrist.x-0.5)**2 + (wrist.y-0.5)**2);
+            if(d < minD) { minD = d; idx = i; }
+        }
+        return idx;
+    }
+
+    function showResults() {
+        let html = "";
+        html += `<table class="result-table"><thead><tr><th rowspan="2">指</th><th rowspan="2">関節</th>`;
+        if (selectedMode === 'both') {
+            html += `<th colspan="2">自動 (Active)</th><th colspan="2">他動 (Passive)</th></tr><tr><th>屈/伸</th><th>TAM</th><th>屈/伸</th><th>TPM</th></tr>`;
+        } else if (selectedMode === 'active') {
+            html += `<th colspan="2">自動 (Active)</th></tr><tr><th>屈/伸</th><th>TAM</th></tr>`;
+        } else {
+            html += `<th colspan="2">他動 (Passive)</th></tr><tr><th>屈/伸</th><th>TPM</th></tr>`;
+        }
+        html += `</thead><tbody>`;
+
+        const tA = activeData.thumb;
+        const tP = passiveData.thumb;
+        const tA_tam = calcTamThumb(tA);
+        const tP_tam = calcTamThumb(tP);
+
+        html += generateRowThumb(tA, tP, tA_tam, tP_tam, 'CM');
+        html += generateRowThumb(tA, tP, tA_tam, tP_tam, 'MP');
+        html += generateRowThumb(tA, tP, tA_tam, tP_tam, 'IP');
+
+        ['index', 'middle', 'ring', 'pinky'].forEach(key => {
+            const fA = activeData[key];
+            const fP = passiveData[key];
+            const fA_tam = calcTamFinger(fA);
+            const fP_tam = calcTamFinger(fP);
+            
+            html += generateRowFinger(fA, fP, fA_tam, fP_tam, 'MP');
+            html += generateRowFinger(fA, fP, fA_tam, fP_tam, 'PIP');
+            html += generateRowFinger(fA, fP, fA_tam, fP_tam, 'DIP');
+        });
+
+        html += `</tbody></table>`;
+        resultContainer.innerHTML = html;
     }
 
     function calcTamThumb(data) {
@@ -314,61 +491,6 @@
         }
         h += `</tr>`;
         return h;
-    }
-
-    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-    
-    hands.onResults(onResults);
-
-    function onResults(results) {
-        canvasElement.width = videoElement.videoWidth;
-        canvasElement.height = videoElement.videoHeight;
-        canvasCtx.save();
-        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-        
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            const targetIdx = findCenterHandIndex(results.multiHandLandmarks);
-            const lm = results.multiHandLandmarks[targetIdx];
-
-            drawConnectors(canvasCtx, lm, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
-            drawLandmarks(canvasCtx, lm, {color: '#FF0000', lineWidth: 1});
-
-            if (currentPhase === 'measuring_radial') {
-                updateJointData('index', 'mp',  calculateAngle(lm[0], lm[5], lm[6]));
-                updateJointData('index', 'pip', calculateAngle(lm[5], lm[6], lm[7]));
-                updateJointData('index', 'dip', calculateAngle(lm[6], lm[7], lm[8]));
-                updateJointData('middle', 'mp',  calculateAngle(lm[0], lm[9], lm[10]));
-                updateJointData('middle', 'pip', calculateAngle(lm[9], lm[10], lm[11]));
-                updateJointData('middle', 'dip', calculateAngle(lm[10], lm[11], lm[12]));
-            }
-            if (currentPhase === 'measuring_ulnar') {
-                updateJointData('ring', 'mp',  calculateAngle(lm[0], lm[13], lm[14]));
-                updateJointData('ring', 'pip', calculateAngle(lm[13], lm[14], lm[15]));
-                updateJointData('ring', 'dip', calculateAngle(lm[14], lm[15], lm[16]));
-                updateJointData('pinky', 'mp',  calculateAngle(lm[0], lm[17], lm[18]));
-                updateJointData('pinky', 'pip', calculateAngle(lm[17], lm[18], lm[19]));
-                updateJointData('pinky', 'dip', calculateAngle(lm[18], lm[19], lm[20]));
-            }
-            if (currentPhase === 'measuring_thumb') {
-                updateJointData('thumb', 'cm', calculateAngle(lm[0], lm[1], lm[2])); 
-                updateJointData('thumb', 'mp', calculateAngle(lm[1], lm[2], lm[3]));
-                updateJointData('thumb', 'ip', calculateAngle(lm[2], lm[3], lm[4]));
-            }
-        }
-        canvasCtx.restore();
-    }
-    
-    function findCenterHandIndex(landmarksArray) {
-        if (landmarksArray.length === 1) return 0;
-        let minD = 999;
-        let idx = 0;
-        for(let i=0; i<landmarksArray.length; i++){
-            const wrist = landmarksArray[i][0];
-            const d = Math.sqrt((wrist.x-0.5)**2 + (wrist.y-0.5)**2);
-            if(d < minD) { minD = d; idx = i; }
-        }
-        return idx;
     }
 </script>
 </body>
