@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v23</title>
+    <title>AI手指可動域検査アシスト v25</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -14,11 +14,23 @@
         .container { position: relative; width: 100%; height: 100vh; overflow: hidden; }
         video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: block; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; }
-        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.4); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 9999; color: white; backdrop-filter: blur(2px); }
-        .mode-select-container { display: flex; flex-direction: column; gap: 20px; width: 85%; max-width: 320px; }
+        
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 9999; color: white; backdrop-filter: blur(5px); }
+        .mode-select-container { display: none; /* 最初は隠す */ flex-direction: column; gap: 20px; width: 85%; max-width: 320px; }
+        
+        /* カメラ起動ボタン */
+        #camera_start_btn {
+            padding: 20px 40px; font-size: 1.3rem; font-weight: bold;
+            background-color: #28a745; color: white; border: none; border-radius: 50px;
+            cursor: pointer; box-shadow: 0 4px 15px rgba(40, 167, 69, 0.5);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+
         .mode-btn { padding: 18px; font-size: 1.1rem; font-weight: bold; background-color: rgba(0, 0, 0, 0.6); color: white; border: 2px solid #00d2ff; border-radius: 12px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 15px rgba(0, 210, 255, 0.3); }
         .mode-btn:active { background-color: #00d2ff; color: black; transform: scale(0.98); }
         .mode-btn small { display: block; font-size: 0.8rem; font-weight: normal; margin-top: 4px; color: #ddd; }
+        
         .status-display { position: fixed; top: 10%; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.8); padding: 12px 24px; border-radius: 30px; color: #00ff00; font-size: 1.2rem; font-weight: bold; z-index: 100; display: none; white-space: nowrap; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
         .cancel-btn { position: fixed; top: 20px; right: 20px; background: rgba(220, 53, 69, 0.9); color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; font-size: 1rem; z-index: 200; cursor: pointer; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
         .result-panel { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 10000; overflow-y: auto; display: none; padding-bottom: 50px; color: #333; }
@@ -27,13 +39,21 @@
         .result-table th, .result-table td { border: 1px solid #ddd; padding: 8px 4px; text-align: center; }
         .result-table th { background-color: #f2f2f2; color: #333; }
         .restart-btn { margin: 30px auto; padding: 15px 40px; background: #6c757d; color: white; border: none; border-radius: 5px; font-size: 1rem; display: block; }
+        
+        #loading_msg { position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 0.9rem; z-index: 500; text-shadow: 1px 1px 2px black; }
     </style>
 </head>
 <body>
 
     <div id="start_overlay" class="overlay">
-        <h2 style="margin-bottom:20px; text-shadow: 1px 1px 5px black;">測定モード選択</h2>
-        <div class="mode-select-container">
+        <div id="init_view">
+            <h2 style="margin-bottom:30px;">AI手指可動域検査</h2>
+            <button id="camera_start_btn" onclick="initCamera()">📷 カメラを起動</button>
+            <p style="margin-top:20px; font-size:0.8rem; color:#ccc;">※許可ポップアップが出たら<br>「許可」を押してください</p>
+        </div>
+
+        <div id="mode_view" class="mode-select-container">
+            <h2 style="margin-bottom:20px; text-shadow: 1px 1px 5px black;">測定モード選択</h2>
             <button class="mode-btn" onclick="selectMode('active')">
                 自動運動のみ
                 <small>Active Motion (TAM)</small>
@@ -47,6 +67,7 @@
                 <small>Active & Passive</small>
             </button>
         </div>
+        <div id="loading_msg"></div>
     </div>
 
     <div id="status_display" class="status-display"></div>
@@ -68,10 +89,13 @@
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
     const startOverlay = document.getElementById('start_overlay');
+    const initView = document.getElementById('init_view');
+    const modeView = document.getElementById('mode_view');
     const statusDisplay = document.getElementById('status_display');
     const cancelBtn = document.getElementById('cancel_btn');
     const resultPanel = document.getElementById('result_panel');
     const resultContainer = document.getElementById('result_container');
+    const loadingMsg = document.getElementById('loading_msg');
 
     let selectedMode = ''; 
     let currentPhase = 'idle';
@@ -80,8 +104,41 @@
     let currentDataRef = activeData; 
     let measurementTimer = null;
 
+    // ★カメラ初期化（ユーザー操作トリガー）
+    async function initCamera() {
+        loadingMsg.innerText = "カメラへのアクセスを要求しています...";
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            videoElement.srcObject = stream;
+            
+            videoElement.onloadedmetadata = () => {
+                loadingMsg.innerText = "AIモデルを読み込んでいます...";
+                videoElement.play();
+                
+                // カメラ成功したらモード選択へ
+                initView.style.display = 'none';
+                modeView.style.display = 'flex';
+                
+                const sendFrame = async () => {
+                    try {
+                        await hands.send({image: videoElement});
+                        loadingMsg.style.display = 'none'; // 成功したら消す
+                    } catch(err) {
+                        console.error(err);
+                    }
+                    requestAnimationFrame(sendFrame);
+                };
+                sendFrame();
+            };
+        } catch (e) {
+            console.error(e);
+            alert("カメラの起動に失敗しました。\nブラウザの設定でカメラ権限を「許可」にしてリロードしてください。\n\nエラー: " + e.message);
+            loadingMsg.innerText = "エラー: カメラ権限がありません";
+            loadingMsg.style.color = "red";
+        }
+    }
+
     function createEmptyData() {
-        // ext初期値を999にして、最小値を更新していく
         return {
             thumb:  { name:"母指", joints: { cm:{val:0, flex:0, ext:999}, mp:{val:0, flex:0, ext:999}, ip:{val:0, flex:0, ext:999} } },
             index:  { name:"示指", joints: { mp:{val:0, flex:0, ext:999}, pip:{val:0, flex:0, ext:999}, dip:{val:0, flex:0, ext:999} } },
@@ -206,7 +263,6 @@
         showResults();
     }
 
-    // ★角度計算（マイナス過伸展に対応）
     function calculateAngle(a, b, c) {
         const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
         let angle = radians * 180.0 / Math.PI;
@@ -214,15 +270,8 @@
         if (angle > 180.0) angle -= 360.0;
         if (angle < -180.0) angle += 360.0;
         
-        // 180度からの変位を計算
-        // 正の値＝屈曲、負の値＝過伸展
-        let result = 180 - Math.abs(angle);
-        
-        // ノイズ除去のためのスナップ（±2度は0とみなす）
-        if (result > -2 && result < 2) {
-            return 0;
-        }
-        
+        let result = 180 - Math.abs(angle); 
+        if (result > -2 && result < 2) return 0;
         return result; 
     }
 
@@ -235,30 +284,16 @@
 
     function updateJointData(fingerKey, jointKey, rawAngle) {
         const j = currentDataRef[fingerKey].joints[jointKey];
-        
-        // フィルタリング
         j.val = applyFilter(j.val, rawAngle, jointKey);
-        
-        // 2度単位に丸める
         let displayVal = Math.round(j.val / 2) * 2;
-
-        // 最大値（屈曲）更新
+        if (displayVal <= 4 && displayVal >= -4) displayVal = 0;
         if (displayVal > j.flex) j.flex = displayVal;
-        
-        // 最小値（伸展）更新
         if (displayVal < j.ext) j.ext = displayVal;
     }
 
-    // ★TAM計算ロジック（医学的定義準拠）
-    // 屈曲 - max(0, 伸展不足分) 
-    // ※過伸展(マイナス)は計算に入れない。伸展不足(プラス)は引く。
-    // ※データ上のextは、過伸展ならマイナス、伸展不足ならプラスで入っているはず。
-    
     function calcTamThumb(data) {
-        // ext > 0 なら伸展不足（引く）。 ext <= 0 なら過伸展または正常（引かない＝0）
         const mp_deficit = Math.max(0, data.joints.mp.ext);
         const ip_deficit = Math.max(0, data.joints.ip.ext);
-        
         return Math.max(0, data.joints.mp.flex - mp_deficit) + 
                Math.max(0, data.joints.ip.flex - ip_deficit);
     }
@@ -267,25 +302,22 @@
         const mp_deficit = Math.max(0, data.joints.mp.ext);
         const pip_deficit = Math.max(0, data.joints.pip.ext);
         const dip_deficit = Math.max(0, data.joints.dip.ext);
-
         return Math.max(0, data.joints.mp.flex - mp_deficit) + 
                Math.max(0, data.joints.pip.flex - pip_deficit) + 
                Math.max(0, data.joints.dip.flex - dip_deficit);
     }
 
-    // ★表示用フォーマッター
     function formatExt(val) {
-        if (val > 900) return "-"; // 初期値のまま
-        if (val > 0) return `-${val}°`; // 伸展不足（例：30度曲がってる → -30表記）
+        if (val > 900) return "-"; 
+        if (val > 0) return `-${val}°`; 
         if (val === 0) return `0°`;
-        return `+${Math.abs(val)}°`; // 過伸展（例：-10度 → +10表記）
+        return `+${Math.abs(val)}°`; 
     }
 
     function generateRowThumb(dA, dP, tamA, tamP, joint) {
         let h = `<tr>`; 
         if(joint==='CM') h += `<td rowspan="3">${dA.name}</td>`;
         h += `<td>${joint}</td>`;
-        
         if(selectedMode !== 'passive') {
             h += `<td>${dA.joints[joint.toLowerCase()].flex}° / ${formatExt(dA.joints[joint.toLowerCase()].ext)}</td>`;
             if(joint==='MP') h += `<td rowspan="2">${tamA}°</td>`;
@@ -304,7 +336,6 @@
         let h = `<tr>`;
         if(joint==='MP') h += `<td rowspan="3">${dA.name}</td>`;
         h += `<td>${joint}</td>`;
-
         if(selectedMode !== 'passive') {
              h += `<td>${dA.joints[joint.toLowerCase()].flex}° / ${formatExt(dA.joints[joint.toLowerCase()].ext)}</td>`;
              if(joint==='MP') h += `<td rowspan="3">${tamA}°</td>`;
@@ -321,23 +352,8 @@
     hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
     hands.onResults(onResults);
 
-    async function startCamera() {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-            videoElement.srcObject = stream;
-            
-            videoElement.onloadedmetadata = () => {
-                videoElement.play();
-                const sendFrame = async () => {
-                    await hands.send({image: videoElement});
-                    requestAnimationFrame(sendFrame);
-                };
-                sendFrame();
-            };
-        } catch (e) { console.error(e); alert("カメラ起動エラー: " + e.message); }
-    }
-    startCamera();
-
+    // ★自動起動は削除し、ボタンクリックでinitCamera()を呼ぶ形式に変更
+    
     let wakeLock = null;
     async function requestWakeLock() { try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {} }
     requestWakeLock();
