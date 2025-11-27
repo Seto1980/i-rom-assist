@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v19</title>
+    <title>AI手指可動域検査アシスト v20</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -53,13 +53,12 @@
             box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         }
 
-        /* ★キャンセルボタン */
         .cancel-btn {
             position: fixed; top: 20px; right: 20px;
             background: rgba(220, 53, 69, 0.9);
             color: white; border: none; padding: 10px 20px;
             border-radius: 20px; font-weight: bold; font-size: 1rem;
-            z-index: 200; cursor: pointer; display: none; /* 初期は非表示 */
+            z-index: 200; cursor: pointer; display: none;
             box-shadow: 0 4px 8px rgba(0,0,0,0.5);
         }
         .cancel-btn:active { transform: scale(0.95); }
@@ -101,7 +100,6 @@
     </div>
 
     <div id="status_display" class="status-display"></div>
-    
     <button id="cancel_btn" class="cancel-btn" onclick="forceFinish()">■ 計測終了</button>
 
     <div class="container">
@@ -126,11 +124,11 @@
     const resultContainer = document.getElementById('result_container');
 
     let selectedMode = ''; 
-    let currentPhase = 'idle'; 
+    let currentPhase = 'idle'; // 'measuring_radial', 'measuring_ulnar', 'measuring_thumb'
     let activeData = createEmptyData();
     let passiveData = createEmptyData();
     let currentDataRef = activeData; 
-    let measurementTimer = null; // タイマーID管理用
+    let measurementTimer = null;
 
     function createEmptyData() {
         return {
@@ -144,13 +142,12 @@
 
     function speakAsync(text) {
         return new Promise((resolve) => {
-            if(currentPhase === 'finished') return; // 終了済みなら喋らない
-
+            if(currentPhase === 'finished') return;
             speechSynthesis.cancel();
             const uttr = new SpeechSynthesisUtterance(text);
             uttr.lang = "ja-JP";
             
-            const timeoutMs = (text.length * 200) + 1500;
+            const timeoutMs = (text.length * 250) + 1500; // 少し余裕を持たせる
             const safeTimer = setTimeout(() => { resolve(); }, timeoutMs);
 
             uttr.onend = () => { clearTimeout(safeTimer); resolve(); };
@@ -163,7 +160,7 @@
     function selectMode(mode) {
         selectedMode = mode;
         startOverlay.style.display = 'none';
-        cancelBtn.style.display = 'block'; // ボタン表示
+        cancelBtn.style.display = 'block';
         if (mode === 'both') {
             startMeasurementSequence('active'); 
         } else {
@@ -171,76 +168,67 @@
         }
     }
 
-    // ★強制終了（キャンセル）処理
     function forceFinish() {
-        // タイマー停止
         if (measurementTimer) clearInterval(measurementTimer);
-        // 音声停止
         speechSynthesis.cancel();
-        
-        // 即座に終了状態へ
         finishAll();
     }
 
+    // ★計測シーケンス（3段階）
     async function startMeasurementSequence(type) {
         if(currentPhase === 'finished') return;
 
         statusDisplay.style.display = 'block';
         currentDataRef = (type === 'active') ? activeData : passiveData;
         
+        // --- 1. 示指・中指 (Radial) ---
         let introText = "";
+        // ★ひらがな化で発音改善
         if (type === 'active') {
-            introText = "自動運動を計測します。前腕を横にしてください。ひとりで握る、開くを繰り返してください。";
+            introText = "じどううんどうをけいそくします。ぜんわんを、よこにしてください。ひとりで、にぎる、ひらくを、くりかえしてください。";
         } else {
-            introText = "他動運動を計測します。前腕を横にしてください。力を抜いてください。";
+            introText = "たどううんどうをけいそくします。ぜんわんを、よこにしてください。ちからを、ぬいてください。";
         }
         
         statusDisplay.innerText = "アナウンス中...";
         await speakAsync(introText);
-        if(currentPhase === 'finished') return; // キャンセルされていたら中断
+        if(currentPhase === 'finished') return;
         
-        await speakAsync("それでは、計測を開始します。10秒間、4本の指を動かしてください。");
+        await speakAsync("それでは、けいそくをかいしします。じゅうびょうかん、よんほんのゆびを、うごかしてください。");
         if(currentPhase === 'finished') return;
 
-        currentPhase = 'measuring_4fingers';
-        let timeLeft = 10;
+        currentPhase = 'measuring_radial'; // 示指・中指のみ計測
+        await runTimer(type, "示指・中指", 10);
         
-        measurementTimer = setInterval(() => {
-            statusDisplay.innerText = (type === 'active' ? "自動" : "他動") + `: 4指 計測中 (${timeLeft})`;
-            timeLeft--;
-            if (timeLeft < 0) {
-                clearInterval(measurementTimer);
-                startThumbSequence(type);
-            }
-        }, 1000);
-    }
-
-    async function startThumbSequence(type) {
+        // --- 2. 環指・小指 (Ulnar) ---
         if(currentPhase === 'finished') return;
-
         currentPhase = 'idle';
         statusDisplay.innerText = "準備中...";
-        await speakAsync("次に、前腕を回外してください。そして母指を5秒間動かしてください。");
-        if(currentPhase === 'finished') return;
+        await speakAsync("つぎに、しょうしがわからけいそくします。てくびをかえして、しょうしがわを、かめらにむけてください。");
         
-        currentPhase = 'measuring_thumb';
-        let timeLeft = 5;
-        measurementTimer = setInterval(() => {
-            statusDisplay.innerText = (type === 'active' ? "自動" : "他動") + `: 母指 計測中 (${timeLeft})`;
-            timeLeft--;
-            if (timeLeft < 0) {
-                clearInterval(measurementTimer);
-                checkNextStep(type);
-            }
-        }, 1000);
-    }
+        if(currentPhase === 'finished') return;
+        await speakAsync("じゅうびょうかん、よんほんのゆびを、うごかしてください。");
+        
+        if(currentPhase === 'finished') return;
+        currentPhase = 'measuring_ulnar'; // 環指・小指のみ計測
+        await runTimer(type, "環指・小指", 10);
 
-    function checkNextStep(finishedType) {
+        // --- 3. 母指 (Thumb) ---
+        if(currentPhase === 'finished') return;
+        currentPhase = 'idle';
+        statusDisplay.innerText = "準備中...";
+        await speakAsync("つぎに、ぜんわんを、かいがいしてください。そして、ぼしを、ごびょうかん、うごかしてください。");
+        
+        if(currentPhase === 'finished') return;
+        currentPhase = 'measuring_thumb'; // 母指のみ計測
+        await runTimer(type, "母指", 5);
+
+        // --- 終了または次のモードへ ---
         if(currentPhase === 'finished') return;
         currentPhase = 'idle';
         
-        if (selectedMode === 'both' && finishedType === 'active') {
-            speakAsync("自動運動が終了しました。続いて他動運動に移ります。").then(() => {
+        if (selectedMode === 'both' && type === 'active') {
+            speakAsync("じどううんどうがしゅうりょうしました。つづいて、たどううんどうに、うつります。").then(() => {
                 if(currentPhase !== 'finished') {
                     setTimeout(() => { startMeasurementSequence('passive'); }, 1000);
                 }
@@ -250,16 +238,29 @@
         }
     }
 
+    // 汎用タイマー関数
+    function runTimer(type, label, seconds) {
+        return new Promise(resolve => {
+            let timeLeft = seconds;
+            measurementTimer = setInterval(() => {
+                const modeLabel = (type === 'active' ? "自動" : "他動");
+                statusDisplay.innerText = `${modeLabel}: ${label} 計測中 (${timeLeft})`;
+                timeLeft--;
+                if (timeLeft < 0) {
+                    clearInterval(measurementTimer);
+                    resolve();
+                }
+            }, 1000);
+        });
+    }
+
     function finishAll() {
         currentPhase = 'finished';
-        cancelBtn.style.display = 'none'; // ボタン消す
+        cancelBtn.style.display = 'none';
         statusDisplay.style.display = 'none';
-
-        // 終了アナウンス（少し短めに）
-        const uttr = new SpeechSynthesisUtterance("計測を終了します。");
+        const uttr = new SpeechSynthesisUtterance("けいそくを、しゅうりょうします。");
         uttr.lang = "ja-JP";
         speechSynthesis.speak(uttr);
-
         showResults();
     }
 
@@ -298,13 +299,18 @@
             drawConnectors(canvasCtx, lm, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
             drawLandmarks(canvasCtx, lm, {color: '#FF0000', lineWidth: 1});
 
-            if (currentPhase === 'measuring_4fingers') {
+            // ★フェーズごとの計測対象分け
+            // 1. 示指・中指 (Radial)
+            if (currentPhase === 'measuring_radial') {
                 updateJointData('index', 'mp',  calculateAngle(lm[0], lm[5], lm[6]));
                 updateJointData('index', 'pip', calculateAngle(lm[5], lm[6], lm[7]));
                 updateJointData('index', 'dip', calculateAngle(lm[6], lm[7], lm[8]));
                 updateJointData('middle', 'mp',  calculateAngle(lm[0], lm[9], lm[10]));
                 updateJointData('middle', 'pip', calculateAngle(lm[9], lm[10], lm[11]));
                 updateJointData('middle', 'dip', calculateAngle(lm[10], lm[11], lm[12]));
+            }
+            // 2. 環指・小指 (Ulnar)
+            if (currentPhase === 'measuring_ulnar') {
                 updateJointData('ring', 'mp',  calculateAngle(lm[0], lm[13], lm[14]));
                 updateJointData('ring', 'pip', calculateAngle(lm[13], lm[14], lm[15]));
                 updateJointData('ring', 'dip', calculateAngle(lm[14], lm[15], lm[16]));
@@ -312,6 +318,7 @@
                 updateJointData('pinky', 'pip', calculateAngle(lm[17], lm[18], lm[19]));
                 updateJointData('pinky', 'dip', calculateAngle(lm[18], lm[19], lm[20]));
             }
+            // 3. 母指 (Thumb)
             if (currentPhase === 'measuring_thumb') {
                 updateJointData('thumb', 'cm', calculateAngle(lm[0], lm[1], lm[2])); 
                 updateJointData('thumb', 'mp', calculateAngle(lm[1], lm[2], lm[3]));
