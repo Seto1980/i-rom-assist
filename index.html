@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI手指可動域検査アシスト v27</title>
+    <title>AI手指可動域検査アシスト v28</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -15,78 +15,50 @@
         video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: block; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; }
         
-        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 9999; color: white; backdrop-filter: blur(5px); }
-        .mode-select-container { display: none; flex-direction: column; gap: 20px; width: 85%; max-width: 320px; }
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 9999; }
         
         #camera_start_btn {
-            padding: 20px 40px; font-size: 1.3rem; font-weight: bold;
+            padding: 20px 50px; font-size: 1.5rem; font-weight: bold;
             background-color: #28a745; color: white; border: none; border-radius: 50px;
-            cursor: pointer; box-shadow: 0 4px 15px rgba(40, 167, 69, 0.5);
-            animation: pulse 2s infinite;
+            cursor: pointer; box-shadow: 0 4px 15px rgba(40, 167, 69, 0.6);
         }
-        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
 
-        .mode-btn { padding: 18px; font-size: 1.1rem; font-weight: bold; background-color: rgba(0, 0, 0, 0.6); color: white; border: 2px solid #00d2ff; border-radius: 12px; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 15px rgba(0, 210, 255, 0.3); }
-        .mode-btn:active { background-color: #00d2ff; color: black; transform: scale(0.98); }
-        .mode-btn small { display: block; font-size: 0.8rem; font-weight: normal; margin-top: 4px; color: #ddd; }
+        .mode-select-container { display: none; flex-direction: column; gap: 20px; width: 85%; max-width: 320px; }
+        .mode-btn { padding: 18px; font-size: 1.1rem; font-weight: bold; background-color: rgba(0, 0, 0, 0.6); color: white; border: 2px solid #00d2ff; border-radius: 12px; cursor: pointer; }
         
-        .status-display { position: fixed; top: 10%; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.8); padding: 12px 24px; border-radius: 30px; color: #00ff00; font-size: 1.2rem; font-weight: bold; z-index: 100; display: none; white-space: nowrap; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
-        .cancel-btn { position: fixed; top: 20px; right: 20px; background: rgba(220, 53, 69, 0.9); color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; font-size: 1rem; z-index: 200; cursor: pointer; display: none; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+        .status-display { position: fixed; top: 10%; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.8); padding: 12px 24px; border-radius: 30px; color: #00ff00; font-size: 1.2rem; font-weight: bold; z-index: 100; display: none; }
+        
+        .cancel-btn { position: fixed; top: 20px; right: 20px; background: rgba(220, 53, 69, 0.9); color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; z-index: 200; display: none; }
+
         .result-panel { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 10000; overflow-y: auto; display: none; padding-bottom: 50px; color: #333; }
         .result-header { background: #007bff; color: white; padding: 15px; font-size: 1.2rem; font-weight: bold; }
         .result-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.8rem; }
         .result-table th, .result-table td { border: 1px solid #ddd; padding: 8px 4px; text-align: center; }
         .result-table th { background-color: #f2f2f2; color: #333; }
         .restart-btn { margin: 30px auto; padding: 15px 40px; background: #6c757d; color: white; border: none; border-radius: 5px; font-size: 1rem; display: block; }
-        
-        #loading_msg { 
-            position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%); 
-            color: #00d2ff; font-weight: bold; font-size: 1rem; z-index: 500; 
-            text-shadow: 1px 1px 2px black; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 10px;
-        }
-        
-        /* 強制リロードボタン（右上） */
-        .force-reload {
-            position: fixed; top: 10px; right: 10px; z-index: 20000;
-            background: #333; color: #aaa; border: 1px solid #555;
-            padding: 5px 10px; font-size: 0.7rem; border-radius: 5px; cursor: pointer;
-        }
     </style>
 </head>
 <body>
 
-    <button class="force-reload" onclick="location.reload()">↻ リロード</button>
-
     <div id="start_overlay" class="overlay">
         <div id="init_view">
             <h2 style="margin-bottom:30px;">AI手指可動域検査</h2>
-            <button id="camera_start_btn" onclick="initCamera()">📷 カメラを起動</button>
-            <p style="margin-top:20px; font-size:0.8rem; color:#ccc;">※許可ポップアップが出たら<br>「許可」を押してください</p>
+            <button id="camera_start_btn" onclick="startSimpleCamera()">📷 カメラ起動</button>
         </div>
 
         <div id="mode_view" class="mode-select-container">
-            <h2 style="margin-bottom:20px; text-shadow: 1px 1px 5px black;">測定モード選択</h2>
-            <button class="mode-btn" onclick="selectMode('active')">
-                自動運動のみ
-                <small>Active Motion (TAM)</small>
-            </button>
-            <button class="mode-btn" onclick="selectMode('passive')">
-                他動運動のみ
-                <small>Passive Motion (TPM)</small>
-            </button>
-            <button class="mode-btn" onclick="selectMode('both')">
-                自動 ＆ 他動
-                <small>Active & Passive</small>
-            </button>
+            <h2 style="margin-bottom:20px;">測定モード選択</h2>
+            <button class="mode-btn" onclick="selectMode('active')">自動運動のみ</button>
+            <button class="mode-btn" onclick="selectMode('passive')">他動運動のみ</button>
+            <button class="mode-btn" onclick="selectMode('both')">自動 ＆ 他動</button>
         </div>
-        <div id="loading_msg"></div>
     </div>
 
     <div id="status_display" class="status-display"></div>
     <button id="cancel_btn" class="cancel-btn" onclick="forceFinish()">■ 計測終了</button>
 
     <div class="container">
-        <video id="input_video" playsinline muted></video>
+        <video id="input_video" playsinline muted autoplay></video>
         <canvas id="output_canvas"></canvas>
     </div>
 
@@ -107,7 +79,6 @@
     const cancelBtn = document.getElementById('cancel_btn');
     const resultPanel = document.getElementById('result_panel');
     const resultContainer = document.getElementById('result_container');
-    const loadingMsg = document.getElementById('loading_msg');
 
     let selectedMode = ''; 
     let currentPhase = 'idle';
@@ -115,71 +86,33 @@
     let passiveData = createEmptyData();
     let currentDataRef = activeData; 
     let measurementTimer = null;
-    let isAiReady = false; // AI準備完了フラグ
 
-    // ★カメラ起動プロセス（v27修正版）
-    async function initCamera() {
-        loadingMsg.innerText = "カメラ権限を確認中...";
+    // ★一番シンプルで強力なカメラ起動コード
+    async function startSimpleCamera() {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { 
-                    facingMode: "environment",
-                    width: { ideal: 1280 }, // 解像度を指定して安定化を図る
-                    height: { ideal: 720 }
-                } 
+                video: { facingMode: "environment", width: 1280, height: 720 } 
             });
             videoElement.srcObject = stream;
-            
-            // ビデオのメタデータ読み込み待ち
-            videoElement.onloadedmetadata = async () => {
-                loadingMsg.innerText = "映像開始中...";
-                try {
-                    await videoElement.play(); // ★ここで再生を確実に行う
-                } catch(e) {
-                    console.error("Play error:", e);
-                    loadingMsg.innerText = "再生エラー: 画面をタップしてください";
-                }
+            videoElement.play();
 
-                // 画面切り替え
-                initView.style.display = 'none';
-                modeView.style.display = 'flex';
-                loadingMsg.innerText = "AIモデル起動中... (初回は時間がかかります)";
-                
-                // AIループ開始
-                startAiLoop();
-            };
+            // 画面切り替え
+            initView.style.display = 'none';
+            modeView.style.display = 'flex';
+
+            // AIループ開始（余計なチェックをせず回し続ける）
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({image: videoElement});
+                },
+                width: 1280,
+                height: 720
+            });
+            camera.start();
+
         } catch (e) {
-            console.error(e);
             alert("カメラエラー: " + e.message);
-            loadingMsg.innerText = "エラー: 再読み込みしてください";
-            loadingMsg.style.color = "red";
         }
-    }
-
-    // ★AIループ処理（独立関数化）
-    async function startAiLoop() {
-        const sendFrame = async () => {
-            if (videoElement.paused || videoElement.ended || !videoElement.videoWidth) {
-                // 映像が来てない時はスキップして次へ
-                requestAnimationFrame(sendFrame);
-                return;
-            }
-            
-            try {
-                await hands.send({image: videoElement});
-                
-                if (!isAiReady) {
-                    isAiReady = true;
-                    loadingMsg.style.display = 'none'; // 準備完了で消す
-                    console.log("AI Ready!");
-                }
-            } catch(err) {
-                console.error("MediaPipe Error:", err);
-                // エラーが出てもループは止めない
-            }
-            requestAnimationFrame(sendFrame);
-        };
-        sendFrame();
     }
 
     function createEmptyData() {
@@ -198,8 +131,7 @@
             speechSynthesis.cancel();
             const uttr = new SpeechSynthesisUtterance(text);
             uttr.lang = "ja-JP";
-            const timeoutMs = (text.length * 250) + 1500; 
-            const safeTimer = setTimeout(() => { resolve(); }, timeoutMs);
+            const safeTimer = setTimeout(() => { resolve(); }, (text.length * 200) + 1500);
             uttr.onend = () => { clearTimeout(safeTimer); resolve(); };
             uttr.onerror = () => { clearTimeout(safeTimer); resolve(); };
             speechSynthesis.speak(uttr);
@@ -207,10 +139,6 @@
     }
 
     function selectMode(mode) {
-        if (!isAiReady) {
-            alert("AIの準備中です。少々お待ちください...");
-            return;
-        }
         selectedMode = mode;
         startOverlay.style.display = 'none';
         cancelBtn.style.display = 'block';
@@ -232,12 +160,9 @@
         statusDisplay.style.display = 'block';
         currentDataRef = (type === 'active') ? activeData : passiveData;
         
-        let introText = "";
-        if (type === 'active') {
-            introText = "自動運動を計測します。まずは前腕を横にしてください。しっかり握る、しっかり伸ばすを繰り返してください。示指側から撮影した後に、しょうしがわの撮影をします。最後に母指を撮影します。";
-        } else {
-            introText = "他動運動を計測します。まずは前腕を横にしてください。力を抜いてください。示指側から撮影した後に、しょうしがわの撮影をします。最後に母指を撮影します。";
-        }
+        let introText = (type === 'active') 
+            ? "自動運動を計測します。まずは前腕を横にしてください。しっかり握る、しっかり伸ばすを繰り返してください。示指側から撮影した後に、しょうしがわの撮影をします。最後に母指を撮影します。"
+            : "他動運動を計測します。まずは前腕を横にしてください。力を抜いてください。示指側から撮影した後に、しょうしがわの撮影をします。最後に母指を撮影します。";
         
         statusDisplay.innerText = "アナウンス中...";
         await speakAsync(introText);
@@ -302,15 +227,12 @@
     }
 
     function finishAll() {
-        if (currentPhase === 'finished') return;
         currentPhase = 'finished';
         cancelBtn.style.display = 'none';
         statusDisplay.style.display = 'none';
-        
         const uttr = new SpeechSynthesisUtterance("計測を終了します。");
         uttr.lang = "ja-JP";
         speechSynthesis.speak(uttr);
-        
         showResults();
     }
 
@@ -343,17 +265,14 @@
     function calcTamThumb(data) {
         const mp_deficit = Math.max(0, data.joints.mp.ext);
         const ip_deficit = Math.max(0, data.joints.ip.ext);
-        return Math.max(0, data.joints.mp.flex - mp_deficit) + 
-               Math.max(0, data.joints.ip.flex - ip_deficit);
+        return Math.max(0, data.joints.mp.flex - mp_deficit) + Math.max(0, data.joints.ip.flex - ip_deficit);
     }
 
     function calcTamFinger(data) {
         const mp_deficit = Math.max(0, data.joints.mp.ext);
         const pip_deficit = Math.max(0, data.joints.pip.ext);
         const dip_deficit = Math.max(0, data.joints.dip.ext);
-        return Math.max(0, data.joints.mp.flex - mp_deficit) + 
-               Math.max(0, data.joints.pip.flex - pip_deficit) + 
-               Math.max(0, data.joints.dip.flex - dip_deficit);
+        return Math.max(0, data.joints.mp.flex - mp_deficit) + Math.max(0, data.joints.pip.flex - pip_deficit) + Math.max(0, data.joints.dip.flex - dip_deficit);
     }
 
     function formatExt(val) {
@@ -399,14 +318,58 @@
 
     const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
     hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    
     hands.onResults(onResults);
 
-    // initCameraはボタンから呼ばれる
+    function onResults(results) {
+        canvasElement.width = videoElement.videoWidth;
+        canvasElement.height = videoElement.videoHeight;
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const targetIdx = findCenterHandIndex(results.multiHandLandmarks);
+            const lm = results.multiHandLandmarks[targetIdx];
+
+            drawConnectors(canvasCtx, lm, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+            drawLandmarks(canvasCtx, lm, {color: '#FF0000', lineWidth: 1});
+
+            if (currentPhase === 'measuring_radial') {
+                updateJointData('index', 'mp',  calculateAngle(lm[0], lm[5], lm[6]));
+                updateJointData('index', 'pip', calculateAngle(lm[5], lm[6], lm[7]));
+                updateJointData('index', 'dip', calculateAngle(lm[6], lm[7], lm[8]));
+                updateJointData('middle', 'mp',  calculateAngle(lm[0], lm[9], lm[10]));
+                updateJointData('middle', 'pip', calculateAngle(lm[9], lm[10], lm[11]));
+                updateJointData('middle', 'dip', calculateAngle(lm[10], lm[11], lm[12]));
+            }
+            if (currentPhase === 'measuring_ulnar') {
+                updateJointData('ring', 'mp',  calculateAngle(lm[0], lm[13], lm[14]));
+                updateJointData('ring', 'pip', calculateAngle(lm[13], lm[14], lm[15]));
+                updateJointData('ring', 'dip', calculateAngle(lm[14], lm[15], lm[16]));
+                updateJointData('pinky', 'mp',  calculateAngle(lm[0], lm[17], lm[18]));
+                updateJointData('pinky', 'pip', calculateAngle(lm[17], lm[18], lm[19]));
+                updateJointData('pinky', 'dip', calculateAngle(lm[18], lm[19], lm[20]));
+            }
+            if (currentPhase === 'measuring_thumb') {
+                updateJointData('thumb', 'cm', calculateAngle(lm[0], lm[1], lm[2])); 
+                updateJointData('thumb', 'mp', calculateAngle(lm[1], lm[2], lm[3]));
+                updateJointData('thumb', 'ip', calculateAngle(lm[2], lm[3], lm[4]));
+            }
+        }
+        canvasCtx.restore();
+    }
     
-    let wakeLock = null;
-    async function requestWakeLock() { try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {} }
-    requestWakeLock();
-    document.addEventListener('visibilitychange', async () => { if (wakeLock !== null && document.visibilityState === 'visible') await requestWakeLock(); });
+    function findCenterHandIndex(landmarksArray) {
+        if (landmarksArray.length === 1) return 0;
+        let minD = 999;
+        let idx = 0;
+        for(let i=0; i<landmarksArray.length; i++){
+            const wrist = landmarksArray[i][0];
+            const d = Math.sqrt((wrist.x-0.5)**2 + (wrist.y-0.5)**2);
+            if(d < minD) { minD = d; idx = i; }
+        }
+        return idx;
+    }
 </script>
 </body>
 </html>
